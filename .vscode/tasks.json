@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "C/C++: g++.exe 构建活动文件",
+            "command": "D:\\c_byq\\mingw64\\bin\\g++.exe",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "D:\\C\\compiler.cpp",
+                "D:\\C\\LexicalAnalysis.cpp", 
+                "D:\\C\\Token.cpp",
+                "-o",
+                "D:\\C\\compiler.exe"
+            ],
+            "options": {
+                "cwd": "D:\\C"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "编译器: D:\\c_byq\\mingw64\\bin\\g++.exe"
+        }
+    ]
+}

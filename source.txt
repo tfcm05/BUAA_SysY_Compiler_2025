@@ -1,0 +1,8 @@
+const int array[2] = {1,2};
+
+int main(){
+    int a, b, c, d;
+    c = getint();
+    printf("output is %d",c);
+    return c;
+}
