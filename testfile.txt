@@ -1,10 +1,7 @@
 int main(){
     int c;
     c= getint();
-    printf("%d",c);
-    return c;
-
-    if (a & b) {
-        
-    }
+    int a, b, d;
+    int x[0];
+    return 0;
 }

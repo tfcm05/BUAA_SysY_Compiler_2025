@@ -1,3 +1,5 @@
+#include"Token.h"
+
 typedef enum {
     a, // 非法符号
     b, c, d, e, f, g, h,
@@ -5,3 +7,5 @@ typedef enum {
 } ErrorCode;
 
 void errorLog(ErrorCode errorCode, int line);
+
+void lexerLog(Token token);

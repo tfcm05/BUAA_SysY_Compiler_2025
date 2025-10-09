@@ -7,8 +7,9 @@
 
 class Parse {
     private:
-        LexicalAnalysis lexicalAnalysis;
+        LexicalAnalysis& lexicalAnalysis;
         Token currentToken;
+        int preLine;
 
         // 编译单元相关
         std::unique_ptr<AstNode> parseCompUnit();
@@ -52,6 +53,7 @@ class Parse {
         std::unique_ptr<AstNode> parseLOrExp();
         std::unique_ptr<AstNode> parseConstExp();
 
+        void initial();
         void advance();
         Token peekNext();
         Token peekSecond();
@@ -61,6 +63,6 @@ class Parse {
 
         void expect(TokenType expected, std::unique_ptr<AstNode>& node);
     public:
-        Parse(LexicalAnalysis lexicalAnalysis);
+        Parse(LexicalAnalysis& lexicalAnalysis);
         std::unique_ptr<AstNode> parse();
 };
