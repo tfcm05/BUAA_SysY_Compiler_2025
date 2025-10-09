@@ -8,11 +8,14 @@
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
-                "D:\\C\\compiler.cpp",
+                "D:\\C\\Compiler.cpp",
                 "D:\\C\\LexicalAnalysis.cpp", 
                 "D:\\C\\Token.cpp",
+                "D:\\C\\GrammaticalAnalysis.cpp",
+                "D:\\C\\AstNode.cpp",
+                "D:\\C\\Error.cpp",
                 "-o",
-                "D:\\C\\compiler.exe"
+                "D:\\C\\Compiler.exe"
             ],
             "options": {
                 "cwd": "D:\\C"
