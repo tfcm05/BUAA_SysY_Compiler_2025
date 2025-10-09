@@ -14,21 +14,26 @@ typedef enum {
     NOT, AND, OR, 
     PLUS, MINU, MULT, DIV, MOD, 
     LSS, LEQ, GRE, GEQ, EQL, NEQ, 
-    SEMICN, COMMA, // ; ,
-    LPARENT, RPARENT, LBRACK, RBRACK, LBRACE, RBRACE, // 括号
+    SEMICN/*;*/, COMMA/*,*/,
+    LPARENT/*(*/, RPARENT/*)*/, LBRACK/*[*/, RBRACK/*]*/, LBRACE/*{*/, RBRACE/*}*/, // 括号
     PRINTFTK,
-    NOTHING
+    END, ERROR
 } TokenType;
+
+extern std::string getTypeCode(TokenType tokenType);
 
 class Token {
     private:
-        int lineNum = 0;
-        TokenType tokenType = NOTHING;
-        std::string value = "";
+        int line;
+        TokenType tokenType;
+        std::string value;
     public:
-        void setToken(int lineNum, TokenType tokenType, std::string value);
+        ~Token() = default;
+        Token() = default;
 
-        int getLineNum();
+        Token(int line, TokenType tokenType, std::string value);
+
+        int getLine();
         TokenType getTokenType();
         std::string getValue();
 };
