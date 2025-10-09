@@ -1,10 +1,11 @@
 #include"include/GrammaticalAnalysis.h"
 #include"include/Token.h"
 #include"include/LexicalAnalysis.h"
+#include"include/Error.h"
 
-Parse::Parse(LexicalAnalysis lexicalAnalysis) : lexicalAnalysis(lexicalAnalysis) {
-    advance();
-};
+Parse::Parse(LexicalAnalysis& lex): lexicalAnalysis(lex) {
+    initial();
+}
 
 std::unique_ptr<AstNode> Parse::parse() {
     return parseCompUnit();
@@ -406,7 +407,7 @@ std::unique_ptr<AstNode> Parse::parsePrimaryExp() {
 }
 
 std::unique_ptr<AstNode> Parse::parseLVal() {
-    auto node = std::make_unique<AstNode>("<LVal");
+    auto node = std::make_unique<AstNode>("<LVal>");
 
     expect(IDENFR, node);
 
@@ -461,8 +462,16 @@ std::unique_ptr<AstNode> Parse::parseForStmt() {
     return node;
 }
 
-void Parse::advance() {
+void Parse::initial() {
+    preLine = 0;
     currentToken = lexicalAnalysis.getNextToken();
+    lexerLog(currentToken);
+}
+
+void Parse::advance() {
+    preLine = currentToken.getLine();
+    currentToken = lexicalAnalysis.getNextToken();
+    lexerLog(currentToken);
 }
 
 Token Parse::peekNext() {
@@ -489,6 +498,13 @@ bool Parse::match(TokenType expected) {
 void Parse::expect(TokenType expect, std::unique_ptr<AstNode>& node) {
     if (!match(expect)) {
         // 错误处理
+        if (expect == SEMICN) {
+            errorLog(ErrorCode::i, preLine);
+        } else if (expect == RPARENT) {
+            errorLog(ErrorCode::j, preLine);
+        } else if (expect == RBRACK) {
+            errorLog(ErrorCode::k, preLine);
+        }
     }
 
     node->addNext(std::make_unique<AstNode>(getTypeCode(CURRENT_TYPE) + " " + currentToken.getValue()));
