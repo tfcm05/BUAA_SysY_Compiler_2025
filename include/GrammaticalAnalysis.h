@@ -2,8 +2,8 @@
 #include"AstNode.h"
 
 #define CURRENT_TYPE currentToken.getTokenType()
-#define NEXT_TYPE peekNext().getTokenType()
-#define SECOND_TYPE peekSecond().getTokenType()
+#define NEXT_TYPE peekNextRef().getTokenType()
+#define SECOND_TYPE peekSecondRef().getTokenType()
 
 class Parse {
     private:
@@ -13,14 +13,12 @@ class Parse {
 
         // 编译单元相关
         std::unique_ptr<AstNode> parseCompUnit();
-        std::unique_ptr<AstNode> parseDecl();
         std::unique_ptr<AstNode> parseConstDecl();
         std::unique_ptr<AstNode> parseVarDecl();
         std::unique_ptr<AstNode> parseFuncDef();
         std::unique_ptr<AstNode> parseMainFuncDef();
 
         // 类型和定义相关
-        std::unique_ptr<AstNode> parseBType();
         std::unique_ptr<AstNode> parseConstDef();
         std::unique_ptr<AstNode> parseVarDef();
         std::unique_ptr<AstNode> parseConstInitVal();
@@ -33,12 +31,12 @@ class Parse {
     
         // 语句块和语句相关
         std::unique_ptr<AstNode> parseBlock();
-        std::unique_ptr<AstNode> parseBlockItem();
         std::unique_ptr<AstNode> parseStmt();
         std::unique_ptr<AstNode> parseForStmt();
 
         // 表达式相关
         std::unique_ptr<AstNode> parseExp();
+        std::unique_ptr<AstNode> parseConstExp();
         std::unique_ptr<AstNode> parseCond();
         std::unique_ptr<AstNode> parseLVal();
         std::unique_ptr<AstNode> parsePrimaryExp();
@@ -51,12 +49,14 @@ class Parse {
         std::unique_ptr<AstNode> parseEqExp();
         std::unique_ptr<AstNode> parseLAndExp();
         std::unique_ptr<AstNode> parseLOrExp();
-        std::unique_ptr<AstNode> parseConstExp();
+        std::unique_ptr<AstNode> parseNumber();
 
         void initial();
         void advance();
         Token peekNext();
         Token peekSecond();
+        const Token& peekNextRef();
+        const Token& peekSecondRef();
 
         bool match(TokenType expected, int mode);
         bool match(TokenType expected);

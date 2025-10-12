@@ -1,6 +1,7 @@
 #include<fstream>
 #include"include/Error.h"
 #include"include/Token.h"
+#include"include/AstNode.h"
 
 void errorLog(ErrorCode errorCode, int line) {
     std::ofstream error("error.txt", std::ios::app);
@@ -8,9 +9,10 @@ void errorLog(ErrorCode errorCode, int line) {
     error.close();
 }
 
-void lexerLog(Token token) {
+void lexerLog(Token& token) {
     std::ofstream lexer("lexer.txt", std::ios::app);
     if (token.getTokenType() == END) return;
-    lexer << getTypeCode(token.getTokenType()) << " " << token.getValue() << std::endl;
+     lexer << getTypeCode(token.getTokenType()) << " " << token.getValue() << " " << token.getLine() << std::endl;
+    //lexer << getTypeCode(token.getTokenType()) << " " << token.getValue() << std::endl;
     lexer.close();
 }

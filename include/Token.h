@@ -1,6 +1,7 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 #include<string>
+#include <utility>
 
 typedef enum {
     MAINTK, // main
@@ -29,12 +30,20 @@ class Token {
         std::string value;
     public:
         ~Token() = default;
-        Token() = default;
+        Token() : line(0), tokenType(ERROR), value("") {}
 
         Token(int line, TokenType tokenType, std::string value);
 
-        int getLine();
-        TokenType getTokenType();
-        std::string getValue();
+        // 拷贝
+        Token(const Token& other);
+        Token& operator = (const Token& other);
+
+        // 移动
+        Token(Token&& other) noexcept;
+        Token& operator = (Token&& other) noexcept;
+
+        int getLine() const;
+        TokenType getTokenType() const;
+        const std::string getValue() const;
 };
 #endif
