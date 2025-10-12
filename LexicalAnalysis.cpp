@@ -30,15 +30,16 @@ LexicalAnalysis::LexicalAnalysis(std::istream& in) : input(in), line(1) {
 }
 
 void LexicalAnalysis::advance() {
+    char preChar = currentChar;
     if (input.get(currentChar)) {
-        if (currentChar == '\n') {
+        if (preChar == '\n') {
             line++;
         }
     } else {
         currentChar = '\0';
     }
 }
-
+ 
 char LexicalAnalysis::peek() {
     return input.peek();
 }
@@ -46,6 +47,35 @@ char LexicalAnalysis::peek() {
 void LexicalAnalysis::skipWhiteSpace() {
     while (std::isspace(currentChar)) {
         advance();
+    }
+}
+
+void LexicalAnalysis::skipComment() {
+    // 单行注释 //
+    if (currentChar == '/' && peek() == '/') {
+        advance();
+        advance();
+        // 跳过直到行尾或文件结束
+        while (currentChar != '\n' && currentChar != '\0') {
+            advance();
+        }
+        if (currentChar == '\n') {
+            advance();
+        }
+    }
+    // 多行注释 /* */
+    else if (currentChar == '/' && peek() == '*') {
+        advance();
+        advance();
+
+        while (currentChar != '\0') {
+            if (currentChar == '*' && peek() == '/') {
+                advance();
+                advance();
+                break;
+            }
+            advance(); // 跳过注释内容
+        }
     }
 }
 
@@ -91,7 +121,17 @@ Token LexicalAnalysis::string() {
 }
 
 Token LexicalAnalysis::getNextTokenInternal() {
-    skipWhiteSpace();
+    while (true) {
+        skipWhiteSpace();
+        
+        // 检查注释
+        if (currentChar == '/' && (peek() == '/' || peek() == '*')) {
+            skipComment();
+            continue; // 跳过注释后继续处理下一个token
+        }
+        
+        break;
+    }
 
     // 文件终止
     if (currentChar == '\0') {
@@ -135,6 +175,7 @@ Token LexicalAnalysis::getNextTokenInternal() {
     if (currentChar == '&') {
         if (peek() == '&') {
             advance();
+            advance();
             return Token(line, TokenType::AND, "&&");
         } else {
             // 错误处理
@@ -144,6 +185,7 @@ Token LexicalAnalysis::getNextTokenInternal() {
         }
     } else if (currentChar == '|') {
         if (peek() == '|') {
+            advance();
             advance();
             return Token(line, TokenType::OR, "||");
         } else {
@@ -158,10 +200,17 @@ Token LexicalAnalysis::getNextTokenInternal() {
     return Token(line, TokenType::ERROR, "");
 }
 
+// 确保缓冲区大小
+void LexicalAnalysis::ensureBufferSize(size_t size) {
+    while (tokenBuffer.size() < size) {
+        tokenBuffer.emplace_back(getNextTokenInternal());
+    }
+}
+
 Token LexicalAnalysis::getNextToken() {
     // 如果缓冲区有Token，先从缓冲区取
     if (!tokenBuffer.empty()) {
-        Token token = tokenBuffer.front();
+        Token token = std::move(tokenBuffer.front());  // 使用移动而不是拷贝
         tokenBuffer.pop_front();
         return token;
     }
@@ -171,21 +220,21 @@ Token LexicalAnalysis::getNextToken() {
 }
 
 Token LexicalAnalysis::peekNextToken() {
-    // 如果缓冲区为空，先获取一个Token放入缓冲区
-    if (tokenBuffer.empty()) {
-        tokenBuffer.push_back(getNextTokenInternal());
-    }
-    
-    // 返回缓冲区的第一个Token
-    return tokenBuffer.front();
+    ensureBufferSize(1);
+    return tokenBuffer.front();  // 拷贝
 }
 
 Token LexicalAnalysis::peekSecondToken() {
-    // 确保缓冲区至少有2个Token
-    while (tokenBuffer.size() < 2) {
-        tokenBuffer.push_back(getNextTokenInternal());
-    }
-    
-    // 返回缓冲区的第二个Token
-    return tokenBuffer[1];
+    ensureBufferSize(2);
+    return tokenBuffer[1];  // 拷贝
+}
+
+const Token& LexicalAnalysis::peekNextTokenRef() {
+    ensureBufferSize(1);
+    return tokenBuffer.front();  // 返回引用，无拷贝
+}
+
+const Token& LexicalAnalysis::peekSecondTokenRef() {
+    ensureBufferSize(2);
+    return tokenBuffer[1];  // 返回引用，无拷贝
 }

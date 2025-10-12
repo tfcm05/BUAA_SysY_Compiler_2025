@@ -8,4 +8,4 @@ typedef enum {
 
 void errorLog(ErrorCode errorCode, int line);
 
-void lexerLog(Token token);
+void lexerLog(Token& token);

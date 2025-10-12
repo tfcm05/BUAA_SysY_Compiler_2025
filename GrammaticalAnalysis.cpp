@@ -1,3 +1,4 @@
+#include<iostream>
 #include"include/GrammaticalAnalysis.h"
 #include"include/Token.h"
 #include"include/LexicalAnalysis.h"
@@ -14,8 +15,12 @@ std::unique_ptr<AstNode> Parse::parse() {
 std::unique_ptr<AstNode> Parse::parseCompUnit() {
     auto node = std::make_unique<AstNode>("<CompUnit>");
 
-    while (match(CONSTTK) || (match(CONSTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
-        node->addNext(parseDecl());
+    while (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
+        if (match(CONSTTK)) {
+            node->addNext(parseConstDecl());
+        } else {
+            node->addNext(parseVarDecl());
+        }
     }
 
     while (match(VOIDTK) || (match(INTTK) && match(IDENFR, 1))) {
@@ -27,24 +32,12 @@ std::unique_ptr<AstNode> Parse::parseCompUnit() {
     return node;
 }
 
-std::unique_ptr<AstNode> Parse::parseDecl() {
-    auto node = std::make_unique<AstNode>("<Decal>");
-
-    if (match(CONSTTK)) {
-        node->addNext(parseConstDecl());
-    } else {
-        node->addNext(parseVarDecl());
-    }
-
-    return node;
-}
-
 std::unique_ptr<AstNode> Parse::parseConstDecl() {
     auto node = std::make_unique<AstNode>("<ConstDecl>");
 
     expect(CONSTTK, node);
 
-    node->addNext(parseBType());
+    expect(INTTK, node);
 
     node->addNext(parseConstDef());
     while (match(COMMA)) {
@@ -64,7 +57,7 @@ std::unique_ptr<AstNode> Parse::parseVarDecl() {
         expect(STATICTK, node);
     }
 
-    node->addNext(parseBType());
+    expect(INTTK, node);
 
     node->addNext(parseVarDef());
     while (match(COMMA)) {
@@ -73,13 +66,6 @@ std::unique_ptr<AstNode> Parse::parseVarDecl() {
     }
 
     expect(SEMICN, node);
-
-    return node;
-}
-
-std::unique_ptr<AstNode> Parse::parseBType() {
-    auto node = std::make_unique<AstNode>("<BType>");
-    expect(INTTK, node);
 
     return node;
 }
@@ -114,7 +100,7 @@ std::unique_ptr<AstNode> Parse::parseVarDef() {
 
     if (match(ASSIGN)) {
         expect(ASSIGN, node);
-        node->addNext(parseConstInitVal());
+        node->addNext(parseInitVal());
     }
 
     return node;
@@ -172,7 +158,15 @@ std::unique_ptr<AstNode> Parse::parseBlock() {
     expect(LBRACE, node);
     
     while (!match(RBRACE)) {
-        node->addNext(parseBlockItem());
+        if (match(CONSTTK) || match(STATICTK) || (match(INTTK) && match(IDENFR, 1) && !match(RPARENT, 2))) {
+            if (match(CONSTTK)) {
+                node->addNext(parseConstDecl());
+            } else {
+                node->addNext(parseVarDecl());
+            }
+        } else {
+            node->addNext(parseStmt());
+        }
     }
     
     expect(RBRACE, node);
@@ -180,22 +174,10 @@ std::unique_ptr<AstNode> Parse::parseBlock() {
     return node;
 }
 
-std::unique_ptr<AstNode> Parse::parseBlockItem() {
-    auto node = std::make_unique<AstNode>("<BlockItem>");
-
-    if (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(RPARENT, 2))) {
-        node->addNext(parseDecl());
-    } else {
-        node->addNext(parseStmt());
-    }
-    
-    return node;
-}
-
 std::unique_ptr<AstNode> Parse::parseStmt() {
     auto node = std::make_unique<AstNode>("<Stmt>");
 
-    if (match(IDENFR)) {
+    if (match(IDENFR) && !match(LPARENT, 1)) {
         node->addNext(parseLVal());
 
         expect(ASSIGN, node);
@@ -204,9 +186,9 @@ std::unique_ptr<AstNode> Parse::parseStmt() {
 
         expect(SEMICN, node);
     }  else if (match(LBRACE)) {
-        expect(LBRACE, node);
         node->addNext(parseBlock());
     } else if (match(IFTK)) {
+        expect(IFTK, node);
         expect(LPARENT, node);
         node->addNext(parseCond());
         expect(RPARENT, node);
@@ -366,22 +348,15 @@ std::unique_ptr<AstNode> Parse::parseMulExp() {
 std::unique_ptr<AstNode> Parse::parseUnaryExp() {
     auto node = std::make_unique<AstNode>("<UnaryExp>");
 
-    if (match(IDENFR)) {
+    if (match(IDENFR) && match(LPARENT, 1)) {
         expect(IDENFR, node);
-
         expect(LPARENT, node);
         if (!match(RPARENT)) {
             node->addNext(parseFuncRParams());
         }
         expect(RPARENT, node);
     } else if (match(PLUS) || match(MINU) || match(NOT)) {
-        if (match(PLUS)) {
-            expect(PLUS, node);
-        } else if (match(MINU)) {
-            expect(MINU, node);
-        } else {
-            expect(NOT, node);
-        }
+        node->addNext(parseUnaryOp());
         node->addNext(parseUnaryExp());
     } else {
         node->addNext(parsePrimaryExp());
@@ -400,7 +375,7 @@ std::unique_ptr<AstNode> Parse::parsePrimaryExp() {
     } else if (match(IDENFR)) {
         node->addNext(parseLVal());
     } else {
-        expect(INTCON, node);
+        node->addNext(parseNumber());
     }
     
     return node;
@@ -436,7 +411,7 @@ std::unique_ptr<AstNode> Parse::parseFuncFParams() {
 std::unique_ptr<AstNode> Parse::parseFuncFParam() {
     auto node = std::make_unique<AstNode>("<FuncFParam>");
 
-    node->addNext(parseBType());
+    expect(INTTK, node);
     expect(IDENFR, node);
 
     if (match(LBRACK)) {
@@ -449,16 +424,125 @@ std::unique_ptr<AstNode> Parse::parseFuncFParam() {
 
 std::unique_ptr<AstNode> Parse::parseFuncRParams() {
     auto node = std::make_unique<AstNode>("<FuncRParams>");
+
+    node->addNext(parseExp());
+
+    while (match(COMMA)) {
+        expect(COMMA, node);
+        node->addNext(parseExp());
+    }
+    
     return node;
 }
 
 std::unique_ptr<AstNode> Parse::parseCond() {
     auto node = std::make_unique<AstNode>("<Cond>");
+
+    node->addNext(parseLOrExp());
+
+    return node;
+}
+
+std::unique_ptr<AstNode> Parse::parseLOrExp() {
+    auto node = std::make_unique<AstNode>("<LOrExp>");
+
+    node->addNext(parseLAndExp());
+
+    while (match(OR)) {
+        expect(OR, node);
+        node->addNext(parseLAndExp());
+    }
+
+    return node;
+}
+
+std::unique_ptr<AstNode> Parse::parseLAndExp() {
+    auto node = std::make_unique<AstNode>("<LAndExp>");
+
+    node->addNext(parseEqExp());
+
+    while (match(AND)) {
+        expect(AND, node);
+        node->addNext(parseEqExp());
+    }
+
+    return node;
+}
+
+std::unique_ptr<AstNode> Parse::parseEqExp() {
+    auto node = std::make_unique<AstNode>("<EqExp>");
+
+    node->addNext(parseRelExp());
+
+    while (match(EQL) || match(NEQ)) {
+        if (match(EQL)) {
+            expect(EQL, node);
+        } else {
+            expect(NEQ, node);
+        }
+        node->addNext(parseRelExp());
+    }
+
+    return node;
+}
+
+std::unique_ptr<AstNode> Parse::parseRelExp() {
+    auto node = std::make_unique<AstNode>("<RelExp>");
+
+    node->addNext(parseAddExp());
+
+    while (match(GRE) || match(GEQ) || match(LSS) || match(LEQ)) {
+        if (match(GRE)) {
+            expect(GRE, node);
+        } else if (match(GEQ)) {
+            expect(GEQ, node);
+        } else if (match(LSS)) {
+            expect(LSS, node);
+        } else {
+            expect(LEQ, node);
+        }
+        node->addNext(parseAddExp());
+    }
+
     return node;
 }
 
 std::unique_ptr<AstNode> Parse::parseForStmt() {
     auto node = std::make_unique<AstNode>("<ForStmt>");
+
+    node->addNext(parseLVal());
+    expect(ASSIGN, node);
+    node->addNext(parseExp());
+
+    while (match(COMMA)) {
+        expect(COMMA, node);
+        node->addNext(parseLVal());
+        expect(ASSIGN, node);
+        node->addNext(parseExp());
+    }
+
+    return node;
+}
+
+std::unique_ptr<AstNode> Parse::parseNumber() {
+    auto node = std::make_unique<AstNode>("<Number>");
+
+    expect(INTCON, node);
+
+    return node;
+}
+
+std::unique_ptr<AstNode> Parse::parseUnaryOp() {
+    auto node = std::make_unique<AstNode>("<UnaryOp>");
+
+    if (match(PLUS)) {
+        expect(PLUS, node);
+    } else if (match(MINU)) {
+        expect(MINU, node);
+    } else {
+        expect(NOT, node);
+    }
+
     return node;
 }
 
@@ -482,6 +566,14 @@ Token Parse::peekSecond() {
     return lexicalAnalysis.peekSecondToken();
 }
 
+const Token& Parse::peekNextRef() {
+    return lexicalAnalysis.peekNextTokenRef();
+}
+
+const Token& Parse::peekSecondRef() {
+    return lexicalAnalysis.peekSecondTokenRef();
+}
+
 bool Parse::match(TokenType expected, int mode) {
     switch (mode) {
         case 0 : return CURRENT_TYPE == expected;
@@ -497,6 +589,7 @@ bool Parse::match(TokenType expected) {
 
 void Parse::expect(TokenType expect, std::unique_ptr<AstNode>& node) {
     if (!match(expect)) {
+        // std::cout << getTypeCode(expect) << " " << getTypeCode(CURRENT_TYPE) << " " << getTypeCode(NEXT_TYPE) << " " << getTypeCode(SECOND_TYPE) << " " <<  currentToken.getLine() << std::endl;
         // 错误处理
         if (expect == SEMICN) {
             errorLog(ErrorCode::i, preLine);
@@ -505,9 +598,8 @@ void Parse::expect(TokenType expect, std::unique_ptr<AstNode>& node) {
         } else if (expect == RBRACK) {
             errorLog(ErrorCode::k, preLine);
         }
+    } else {
+        node->addNext(std::make_unique<AstNode>(getTypeCode(CURRENT_TYPE) + " " + currentToken.getValue()));
+        advance();
     }
-
-    node->addNext(std::make_unique<AstNode>(getTypeCode(CURRENT_TYPE) + " " + currentToken.getValue()));
-
-    advance();
 }

@@ -1,20 +1,50 @@
 #include"include/Token.h"
 
-Token::Token(int line, TokenType tokenType, std::string value) {
-    Token::line = line;
-    Token::tokenType = tokenType;
-    Token::value = value;
+Token::Token(int line, TokenType tokenType, std::string value) : line(line), tokenType(tokenType), value(value) {}
+
+// 拷贝构造函数实现
+Token::Token(const Token& other)
+    : line(other.line), tokenType(other.tokenType), value(other.value) {}
+
+// 拷贝赋值运算符实现
+Token& Token::operator=(const Token& other) {
+    if (this != &other) {
+        line = other.line;
+        tokenType = other.tokenType;
+        value = other.value;
+    }
+    return *this;
 }
 
-int Token::getLine() {
+// 移动构造函数实现
+Token::Token(Token&& other) noexcept
+    : line(other.line), tokenType(other.tokenType), value(std::move(other.value)) {
+    other.line = 0;
+    other.tokenType = TokenType::ERROR;
+}
+
+// 移动赋值运算符实现
+Token& Token::operator=(Token&& other) noexcept {
+    if (this != &other) {
+        line = other.line;
+        tokenType = other.tokenType;
+        value = std::move(other.value);
+        
+        other.line = 0;
+        other.tokenType = TokenType::ERROR;
+    }
+    return *this;
+}
+
+int Token::getLine() const{
     return line;
 }
 
-TokenType Token::getTokenType() {
+TokenType Token::getTokenType() const{
     return tokenType;
 }
 
-std::string Token::getValue() {
+const std::string Token::getValue() const{
     return value;
 }
 

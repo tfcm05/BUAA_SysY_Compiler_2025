@@ -1,7 +1,0 @@
-int main(){
-    int c;
-    c= getint();
-    int a, b, d;
-    int x[0];
-    return 0;
-}
