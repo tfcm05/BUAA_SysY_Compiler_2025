@@ -44,6 +44,6 @@ class Token {
 
         int getLine() const;
         TokenType getTokenType() const;
-        const std::string getValue() const;
+        std::string getValue() const;
 };
 #endif

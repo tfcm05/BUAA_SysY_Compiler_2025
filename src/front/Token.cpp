@@ -1,4 +1,4 @@
-#include"include/Token.h"
+#include"../../include/front/Token.h"
 
 Token::Token(int line, TokenType tokenType, std::string value) : line(line), tokenType(tokenType), value(value) {}
 
@@ -36,15 +36,15 @@ Token& Token::operator=(Token&& other) noexcept {
     return *this;
 }
 
-int Token::getLine() const{
+int Token::getLine() const {
     return line;
 }
 
-TokenType Token::getTokenType() const{
+TokenType Token::getTokenType() const {
     return tokenType;
 }
 
-const std::string Token::getValue() const{
+std::string Token::getValue() const {
     return value;
 }
 
