@@ -1,8 +1,8 @@
 #include<iostream>
-#include"include/GrammaticalAnalysis.h"
-#include"include/Token.h"
-#include"include/LexicalAnalysis.h"
-#include"include/Error.h"
+#include"../../include/front/GrammaticalAnalysis.h"
+#include"../../include/front/Token.h"
+#include"../../include/front/LexicalAnalysis.h"
+#include"../../include/Error.h"
 
 Parse::Parse(LexicalAnalysis& lex): lexicalAnalysis(lex) {
     initial();
@@ -177,7 +177,9 @@ std::unique_ptr<AstNode> Parse::parseBlock() {
 std::unique_ptr<AstNode> Parse::parseStmt() {
     auto node = std::make_unique<AstNode>("<Stmt>");
 
-    if (match(IDENFR) && !match(LPARENT, 1)) {
+    int a,b,c;
+    a,b = 2,c;
+    if (match(IDENFR) && lexicalAnalysis.isAssign()) {
         node->addNext(parseLVal());
 
         expect(ASSIGN, node);
@@ -599,7 +601,7 @@ void Parse::expect(TokenType expect, std::unique_ptr<AstNode>& node) {
             errorLog(ErrorCode::k, preLine);
         }
     } else {
-        node->addNext(std::make_unique<AstNode>(getTypeCode(CURRENT_TYPE) + " " + currentToken.getValue()));
+        node->addNext(std::make_unique<TokenAstNode>(getTypeCode(CURRENT_TYPE), currentToken.getValue()));
         advance();
     }
 }

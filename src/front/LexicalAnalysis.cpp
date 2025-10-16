@@ -1,6 +1,6 @@
 #include<iostream>
-#include"include/LexicalAnalysis.h"
-#include"include/Error.h"
+#include"../../include/front/LexicalAnalysis.h"
+#include"../../include/Error.h"
 
 std::unordered_map<std::string, TokenType> keywords = {
     {"main", MAINTK},
@@ -237,4 +237,26 @@ const Token& LexicalAnalysis::peekNextTokenRef() {
 const Token& LexicalAnalysis::peekSecondTokenRef() {
     ensureBufferSize(2);
     return tokenBuffer[1];  // 返回引用，无拷贝
+}
+
+bool LexicalAnalysis::isAssign() {
+    int num = tokenBuffer.size();
+    for (int i = 0; i < num; i++) {
+        if (tokenBuffer[i].getTokenType() == ASSIGN) {
+            return true;
+        } else if (tokenBuffer[i].getTokenType() == SEMICN) {
+            return false;
+        }
+    }
+
+    Token temp;
+    do {
+        temp = getNextTokenInternal();
+        tokenBuffer.emplace_back(temp);
+        if (temp.getTokenType() == ASSIGN) {
+            return true;
+        }
+    } while (temp.getTokenType() != SEMICN && temp.getTokenType() != END);
+
+    return false;
 }

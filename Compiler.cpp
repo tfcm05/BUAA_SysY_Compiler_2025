@@ -1,7 +1,8 @@
 #include<stdio.h>
 #include<fstream>
-#include"include/LexicalAnalysis.h"
-#include"include/GrammaticalAnalysis.h"
+
+#include"include/front/LexicalAnalysis.h"
+#include"include/front/GrammaticalAnalysis.h"
 
 int main() {
     std::ifstream file("testfile.txt"); // 打开文件
@@ -13,4 +14,6 @@ int main() {
     Parse parse = Parse(lexicalAnalysis);
     auto root = parse.parse();
     root->print();
+
+    return 0;
 }

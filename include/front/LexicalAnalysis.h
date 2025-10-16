@@ -35,5 +35,7 @@ class LexicalAnalysis {
 
         const Token& peekNextTokenRef();  // 查看下一个token（引用）
         const Token& peekSecondTokenRef(); // 查看第二个token（引用）
+
+        bool isAssign();
 };
 #endif

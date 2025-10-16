@@ -63,6 +63,7 @@ class Parse {
 
         void expect(TokenType expected, std::unique_ptr<AstNode>& node);
     public:
+        ~Parse() = default;
         Parse(LexicalAnalysis& lexicalAnalysis);
         std::unique_ptr<AstNode> parse();
 };
