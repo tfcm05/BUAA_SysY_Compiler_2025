@@ -17,7 +17,6 @@ typedef enum {
     LSS, LEQ, GRE, GEQ, EQL, NEQ, 
     SEMICN/*;*/, COMMA/*,*/,
     LPARENT/*(*/, RPARENT/*)*/, LBRACK/*[*/, RBRACK/*]*/, LBRACE/*{*/, RBRACE/*}*/, // 括号
-    PRINTFTK,
     END, ERROR
 } TokenType;
 
@@ -32,7 +31,7 @@ class Token {
         ~Token() = default;
         Token() : line(0), tokenType(ERROR), value("") {}
 
-        Token(int line, TokenType tokenType, std::string value);
+        Token(int line, TokenType tokenType,const std::string& value);
 
         // 拷贝
         Token(const Token& other);

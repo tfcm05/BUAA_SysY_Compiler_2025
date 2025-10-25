@@ -1,4 +1,5 @@
 #include"front/Token.h"
+#include"front/AstNode.h"
 
 typedef enum {
     a, // 非法符号
@@ -8,4 +9,6 @@ typedef enum {
 
 void errorLog(ErrorCode errorCode, int line);
 
-void lexerLog(Token& token);
+void lexerLog(const Token& token);
+
+void parserLog(const AstNode& root);

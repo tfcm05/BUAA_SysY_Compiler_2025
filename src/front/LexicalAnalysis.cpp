@@ -14,7 +14,6 @@ std::unordered_map<std::string, TokenType> keywords = {
     {"break", BREAKTK},
     {"continue", CONTINUETK},
     {"return", RETURNTK},
-    {"printf", PRINTFTK}
 };
 
 std::unordered_map<char, TokenType> singleCharOps = {

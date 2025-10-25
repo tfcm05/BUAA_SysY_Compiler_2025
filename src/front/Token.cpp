@@ -1,6 +1,6 @@
 #include"../../include/front/Token.h"
 
-Token::Token(int line, TokenType tokenType, std::string value) : line(line), tokenType(tokenType), value(value) {}
+Token::Token(int line, TokenType tokenType, const std::string& value) : line(line), tokenType(tokenType), value(value) {}
 
 // 拷贝构造函数实现
 Token::Token(const Token& other)
@@ -88,7 +88,6 @@ std::string getTypeCode(TokenType tokentype) {
         case RBRACK: return "RBRACK";
         case LBRACE: return "LBRACE";
         case RBRACE: return "RBRACE";
-        case PRINTFTK: return "PRINTFTK";
         default: return "UNKNOWN";
     }
 }
