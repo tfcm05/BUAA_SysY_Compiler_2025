@@ -1,43 +1,39 @@
+#ifndef SYMBOL_H
+#define SYMBOL_H
+
+#include"Value.h"
 #include<string>
 #include<vector>
 
-typedef enum {
+enum class DataType {
     DATA_VOID,
     DATA_INT,
     DATA_ARRAY,
-} DataType;
-
-typedef enum {
-    SYMBOL_VAR,
-    SYMBOL_FUNC,
-} SymbolType;
-
-struct TypeInfo {
-    DataType dataType;
-    int size; // 类型大小
-    std::vector<TypeInfo> elements; // 数组元素
 };
 
 class Symbol {
     protected:
         std::string name;
-        SymbolType symbolType; // 符号类型
-        TypeInfo typeInfo; // 类型信息
-
-        bool isConst; // 常量
-        bool isGlobal; // 全局
-
-        int scopeLevel;  // 作用域层级
+        DataType dataType; // 类型
 
         // llvm
+        ValuePtr value;
+    public:
+        // 初始化
+        Symbol(const std::string& name, const DataType& dataType);
 };
 
-class VarSymbol : Symbol {
-
-};
-
-class FuncSymbol : Symbol {
+class VarSymbol : public Symbol {
     private:
-        TypeInfo returnType; // 函数返回类型
-        std::vector<TypeInfo> params;   // 函数参数类型
+        bool isStatic;
+        bool isConst;
+    public:
+        VarSymbol(const std::string& name, const DataType& dataType, bool isStatic, bool isConst);
 };
+
+class FuncSymbol : public Symbol {
+    private:
+        std::vector<make_shared<VarSymbol>> parameters;
+};
+
+#endif
