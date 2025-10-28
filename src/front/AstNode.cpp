@@ -1,265 +1,470 @@
-#include "../../include/front/AstNode.h"
+#include"../../include/front/AstNode.h"
+#include<utility>
+#include<stdexcept>
 
-#include <utility>
-#include <variant>
+/*
+ * Exp and its derived classes
+ */
 
-// ---- CompUnit ----
-CompUnit::CompUnit() = default;
+LiteralExp::LiteralExp(int val)
+    : literalType(LiteralType::NUMBER), value(val) {}
 
-void CompUnit::addGlobalVarDefStmt(std::unique_ptr<VariableDefStmt> varDefStmt) {
-    if (varDefStmt) globalVarDefStmts.push_back(std::move(varDefStmt));
+LiteralExp::LiteralExp(const std::string& val)
+    : literalType(LiteralType::STRING), value(val) {}
+
+LiteralExp::LiteralType LiteralExp::getLiteralType() const {
+    return literalType;
 }
-
-void CompUnit::addFuncDefStmt(std::unique_ptr<FunctionDefStmt> funcDefStmt) {
-    if (funcDefStmt) funcDefStmts.push_back(std::move(funcDefStmt));
-}
-
-void CompUnit::setMainFuncDef(std::unique_ptr<FunctionDefStmt> mainFuncDefStmt) { mainFuncDef = std::move(mainFuncDefStmt); }
-
-size_t CompUnit::getGlobalVarDefStmtsCount() const { return globalVarDefStmts.size(); }
-
-VariableDefStmt* CompUnit::getGlobalVarDefStmt(size_t index) const {
-    return index < globalVarDefStmts.size() ? globalVarDefStmts[index].get() : nullptr;
-}
-
-const std::vector<std::unique_ptr<VariableDefStmt>>& CompUnit::getGlobalVarDefStmts() const { return globalVarDefStmts; }
-
-size_t CompUnit::getFuncDefStmtsCount() const { return funcDefStmts.size(); }
-
-FunctionDefStmt* CompUnit::getFuncDefStmt(size_t index) const {
-    return index < funcDefStmts.size() ? funcDefStmts[index].get() : nullptr;
-}
-
-const std::vector<std::unique_ptr<FunctionDefStmt>>& CompUnit::getFuncDefStmts() const { return funcDefStmts; }
-
-FunctionDefStmt* CompUnit::getMainFuncDef() const { return mainFuncDef.get(); }
-
-// ---- Exp subclasses ----
-
-// LiteralExp
-LiteralExp::LiteralExp(int val) : value(val) {}
-LiteralExp::LiteralExp(const std::string& val) : value(val) {}
-
-bool LiteralExp::isInt() const { return std::holds_alternative<int>(value); }
-bool LiteralExp::isString() const { return std::holds_alternative<std::string>(value); }
 
 int LiteralExp::getIntValue() const {
-    if (auto p = std::get_if<int>(&value)) return *p;
-    return 0; // 若类型不匹配，返回默认 0
+    return std::get<int>(value);
 }
 
 const std::string& LiteralExp::getStringValue() const {
-    static const std::string empty;
-    if (auto p = std::get_if<std::string>(&value)) return *p;
-    return empty;
+    return std::get<std::string>(value);
 }
 
-void LiteralExp::setIntValue(int val) { value = val; }
-void LiteralExp::setStringValue(const std::string& val) { value = val; }
+IdentifierExp::IdentifierExp(const std::string& id)
+    : identifier(id) {}
 
-// IdentifierExp
-IdentifierExp::IdentifierExp(const std::string& id) : identifier(id) {}
-const std::string& IdentifierExp::getIdentifier() const { return identifier; }
-void IdentifierExp::setIdentifier(const std::string& id) { identifier = id; }
+const std::string& IdentifierExp::getIdentifier() const {
+    return identifier;
+}
 
-// FunctionCallExp
-FunctionCallExp::FunctionCallExp(std::unique_ptr<Exp> func, std::vector<std::unique_ptr<Exp>> params)
-    : function(std::move(func)), RealParams(std::move(params)) {}
+void IdentifierExp::setIdentifier(const std::string& id) {
+    identifier = id;
+}
 
-Exp* FunctionCallExp::getFunction() const { return function.get(); }
+FunctionCallExp::FunctionCallExp(std::unique_ptr<Exp> func, std::vector<std::unique_ptr<Exp>> rParams)
+    : function(std::move(func)), RealParams(std::move(rParams)) {}
 
-std::unique_ptr<Exp> FunctionCallExp::releaseFunction() { return std::move(function); }
+Exp* FunctionCallExp::getFunction() const {
+    return function.get();
+}
 
-void FunctionCallExp::setFunction(std::unique_ptr<Exp> func) { function = std::move(func); }
+std::unique_ptr<Exp> FunctionCallExp::releaseFunction() {
+    return std::move(function);
+}
 
-size_t FunctionCallExp::getRealParamsCount() const { return RealParams.size(); }
+void FunctionCallExp::setFunction(std::unique_ptr<Exp> func) {
+    function = std::move(func);
+}
 
-Exp* FunctionCallExp::getRealParam(size_t index) const { return index < RealParams.size() ? RealParams[index].get() : nullptr; }
+size_t FunctionCallExp::getRealParamsCount() const {
+    return RealParams.size();
+}
+
+Exp* FunctionCallExp::getRealParam(size_t index) const {
+    if (index < RealParams.size()) return RealParams[index].get();
+    return nullptr;
+}
 
 void FunctionCallExp::addRealParam(std::unique_ptr<Exp> param) {
-    if (param) RealParams.push_back(std::move(param));
+    RealParams.push_back(std::move(param));
 }
 
-const std::vector<std::unique_ptr<Exp>>& FunctionCallExp::getRealParams() const { return RealParams; }
+const std::vector<std::unique_ptr<Exp>>& FunctionCallExp::getRealParams() const {
+    return RealParams;
+}
 
-// SubscriptExp
 SubscriptExp::SubscriptExp(std::unique_ptr<Exp> arr, std::unique_ptr<Exp> sub)
     : array(std::move(arr)), subscript(std::move(sub)) {}
 
-Exp* SubscriptExp::getArray() const { return array.get(); }
-Exp* SubscriptExp::getSubscript() const { return subscript.get(); }
+Exp* SubscriptExp::getArray() const {
+    return array.get();
+}
 
-std::unique_ptr<Exp> SubscriptExp::releaseArray() { return std::move(array); }
-std::unique_ptr<Exp> SubscriptExp::releaseSubscript() { return std::move(subscript); }
+Exp* SubscriptExp::getSubscript() const {
+    return subscript.get();
+}
 
-void SubscriptExp::setArray(std::unique_ptr<Exp> arr) { array = std::move(arr); }
-void SubscriptExp::setSubscript(std::unique_ptr<Exp> sub) { subscript = std::move(sub); }
+std::unique_ptr<Exp> SubscriptExp::releaseArray() {
+    return std::move(array);
+}
 
-// UnaryExp
-UnaryExp::UnaryExp(Op operation, std::unique_ptr<Exp> expression)
-    : op(operation), exp(std::move(expression)) {}
+std::unique_ptr<Exp> SubscriptExp::releaseSubscript() {
+    return std::move(subscript);
+}
 
-UnaryExp::Op UnaryExp::getOp() const { return op; }
-void UnaryExp::setOp(Op operation) { op = operation; }
+void SubscriptExp::setArray(std::unique_ptr<Exp> arr) {
+    array = std::move(arr);
+}
 
-Exp* UnaryExp::getExp() const { return exp.get(); }
-std::unique_ptr<Exp> UnaryExp::releaseExp() { return std::move(exp); }
-void UnaryExp::setExp(std::unique_ptr<Exp> expression) { exp = std::move(expression); }
+void SubscriptExp::setSubscript(std::unique_ptr<Exp> sub) {
+    subscript = std::move(sub);
+}
 
-// BinaryExp
-BinaryExp::BinaryExp(std::unique_ptr<Exp> left, BinaryOp operation, std::unique_ptr<Exp> right)
-    : lhs(std::move(left)), op(operation), rhs(std::move(right)) {}
+UnaryExp::UnaryExp(UnaryOp uop, std::unique_ptr<Exp> e)
+    : unaryOp(uop), exp(std::move(e)) {}
 
-Exp* BinaryExp::getLhs() const { return lhs.get(); }
-Exp* BinaryExp::getRhs() const { return rhs.get(); }
-BinaryExp::BinaryOp BinaryExp::getOp() const { return op; }
+UnaryExp::UnaryOp UnaryExp::getUnaryOp() const {
+    return unaryOp;
+}
 
-std::unique_ptr<Exp> BinaryExp::releaseLhs() { return std::move(lhs); }
-std::unique_ptr<Exp> BinaryExp::releaseRhs() { return std::move(rhs); }
+void UnaryExp::setUnaryOp(UnaryOp uop) {
+    unaryOp = uop;
+}
 
-void BinaryExp::setLhs(std::unique_ptr<Exp> left) { lhs = std::move(left); }
-void BinaryExp::setRhs(std::unique_ptr<Exp> right) { rhs = std::move(right); }
-void BinaryExp::setOp(BinaryOp operation) { op = operation; }
+Exp* UnaryExp::getExp() const {
+    return exp.get();
+}
 
-// ---- Stmt ----
-Stmt::Stmt(int line) : line(line) {}
-int Stmt::getLine() const { return line; }
-void Stmt::setLine(int l) { line = l; }
+std::unique_ptr<Exp> UnaryExp::releaseExp() {
+    return std::move(exp);
+}
 
-// ---- VariableDef ----
-VariableDef::VariableDef(const std::string& id, bool arrayFlag,
-                         std::unique_ptr<Exp> arrSize, std::vector<std::unique_ptr<Exp>> init)
-    : identifier(id), arrayFlag(arrayFlag), arraySize(std::move(arrSize)), initial(std::move(init)) {}
+void UnaryExp::setExp(std::unique_ptr<Exp> e) {
+    exp = std::move(e);
+}
 
-const std::string& VariableDef::getIdentifier() const { return identifier; }
-void VariableDef::setIdentifier(const std::string& id) { identifier = id; }
+BinaryExp::BinaryExp(std::unique_ptr<Exp> l, BinaryOp bop, std::unique_ptr<Exp> r)
+    : lhs(std::move(l)), binaryOp(bop), rhs(std::move(r)) {}
 
-bool VariableDef::isArray() const { return arrayFlag; }
-void VariableDef::setIsArray(bool arrayFlag) { VariableDef::arrayFlag = arrayFlag; }
+Exp* BinaryExp::getLhs() const {
+    return lhs.get();
+}
 
-Exp* VariableDef::getArraySize() const { return arraySize.get(); }
-std::unique_ptr<Exp> VariableDef::releaseArraySize() { return std::move(arraySize); }
-void VariableDef::setArraySize(std::unique_ptr<Exp> arrSize) { arraySize = std::move(arrSize); }
+Exp* BinaryExp::getRhs() const {
+    return rhs.get();
+}
 
-size_t VariableDef::getInitialCount() const { return initial.size(); }
-Exp* VariableDef::getInitial(size_t index) const { return index < initial.size() ? initial[index].get() : nullptr; }
-void VariableDef::addInitial(std::unique_ptr<Exp> init) { if (init) initial.push_back(std::move(init)); }
-const std::vector<std::unique_ptr<Exp>>& VariableDef::getInitials() const { return initial; }
+BinaryExp::BinaryOp BinaryExp::getBinaryOp() const {
+    return binaryOp;
+}
 
-// ---- VariableDefStmt ----
-VariableDefStmt::VariableDefStmt(int line, std::vector<std::unique_ptr<VariableDef>> defs)
-    : Stmt(line), staticFlag(false), constFlag(false), defs(std::move(defs)) {}
+std::unique_ptr<Exp> BinaryExp::releaseLhs() {
+    return std::move(lhs);
+}
 
-bool VariableDefStmt::isStatic() const { return staticFlag; }
-bool VariableDefStmt::isConst() const { return constFlag; }
-void VariableDefStmt::setStaticFlag(bool flag) { staticFlag = flag; }
-void VariableDefStmt::setConstFlag(bool flag) { constFlag = flag; }
+std::unique_ptr<Exp> BinaryExp::releaseRhs() {
+    return std::move(rhs);
+}
 
-BasicType VariableDefStmt::getVarType() const { return varType; }
-void VariableDefStmt::setVarType(BasicType type) { varType = type; }
+void BinaryExp::setLhs(std::unique_ptr<Exp> l) {
+    lhs = std::move(l);
+}
 
-size_t VariableDefStmt::getDefsCount() const { return defs.size(); }
+void BinaryExp::setRhs(std::unique_ptr<Exp> r) {
+    rhs = std::move(r);
+}
 
-VariableDef* VariableDefStmt::getDef(size_t index) const { return index < defs.size() ? defs[index].get() : nullptr; }
-void VariableDefStmt::addDef(std::unique_ptr<VariableDef> decl) { if (decl) defs.push_back(std::move(decl)); }
-const std::vector<std::unique_ptr<VariableDef>>& VariableDefStmt::getDefs() const { return defs; }
+void BinaryExp::setBinaryOp(BinaryOp bop) {
+    binaryOp = bop;
+}
 
-// ---- Param ----
-Param::Param(const std::string& id, BasicType type, bool arrayFlag) : identifier(id), paramType(type), arrayFlag(arrayFlag) {}
+/*
+ * Stmt and derived classes
+ */
 
-const std::string& Param::getIdentifier() const { return identifier; }
-void Param::setIdentifier(const std::string& id) { identifier = id; }
+Stmt::Stmt(int sl)
+    : startLine(sl) {}
 
-BasicType Param::getParamType() const { return paramType; }
-void Param::setParamType(BasicType type) { paramType = type; }
+int Stmt::getLine() const { return startLine; }
 
-bool Param::isArray() const { return arrayFlag; }
-void Param::setIsArray(bool arrayFlag) { Param::arrayFlag = arrayFlag; }
+void Stmt::setLine(int sl) { startLine = sl; }
 
-// ---- FunctionDefStmt ----
-FunctionDefStmt::FunctionDefStmt(int line, BasicType retType, std::vector<std::unique_ptr<Param>> params, std::unique_ptr<Stmt> statement)
-    : Stmt(line), identifier(), funcType(retType), formatParams(std::move(params)), stmt(std::move(statement)) {}
+VariableDeclarator::VariableDeclarator()
+    : dimension(0) {}
 
-const std::string& FunctionDefStmt::getIdentifier() const { return identifier; }
-void FunctionDefStmt::setIdentifier(const std::string& id) { identifier = id; }
+const std::string& VariableDeclarator::getIdentifier() const { return identifier; }
 
-BasicType FunctionDefStmt::getFuncType() const { return funcType; }
-void FunctionDefStmt::setFuncType(BasicType type) { funcType = type; }
+void VariableDeclarator::setIdentifier(const std::string& id) {
+    identifier = id;
+}
 
-size_t FunctionDefStmt::getFormatParamsCount() const { return formatParams.size(); }
-Param* FunctionDefStmt::getFormatParam(size_t index) const { return index < formatParams.size() ? formatParams[index].get() : nullptr; }
-void FunctionDefStmt::addFormatParam(std::unique_ptr<Param> param) { if (param) formatParams.push_back(std::move(param)); }
-const std::vector<std::unique_ptr<Param>>& FunctionDefStmt::getFormatParams() const { return formatParams; }
-void FunctionDefStmt::setFormatParams(std::vector<std::unique_ptr<Param>> params) { formatParams = std::move(params); }
+int VariableDeclarator::getDimension() const {
+    return dimension;
+}
 
-bool FunctionDefStmt::hasStmt() const { return stmt != nullptr; }
-Stmt* FunctionDefStmt::getStmt() const { return stmt.get(); }
-std::unique_ptr<Stmt> FunctionDefStmt::releaseStmt() { return std::move(stmt); }
-void FunctionDefStmt::setStmt(std::unique_ptr<Stmt> statement) { stmt = std::move(statement); }
+void VariableDeclarator::setDimension(int dim) {
+    dimension = dim;
+}
 
-// ---- ExpStmt ----
-ExpStmt::ExpStmt(int line, std::unique_ptr<Exp> exp) : Stmt(line), exp(std::move(exp)) {}
+void VariableDeclarator::increaseDimension() {
+    dimension++;
+}
 
-Exp* ExpStmt::getExp() const { return exp.get(); }
-std::unique_ptr<Exp> ExpStmt::releaseExp() { return std::move(exp); }
-void ExpStmt::setExp(std::unique_ptr<Exp> exp) { ExpStmt::exp = std::move(exp); }
+// VariableDeclarator
+size_t VariableDeclarator::getDimensionSizesCount() const { return dimensionSizes.size(); }
+Exp* VariableDeclarator::getDimensionSize(size_t index) const { return dimensionSizes.at(index).get(); }
+void VariableDeclarator::addDimensionSize(std::unique_ptr<Exp> dimSize) { dimensionSizes.push_back(std::move(dimSize)); }
+const std::vector<std::unique_ptr<Exp>>& VariableDeclarator::getDimensionSizes() const { return dimensionSizes; }
 
-// ---- ForStmt ----
-ForStmt::ForStmt(int line, std::unique_ptr<Stmt> init, std::unique_ptr<Exp> cond,
-                 std::unique_ptr<Exp> iter, std::unique_ptr<Stmt> statement)
-    : Stmt(line), initial(std::move(init)), condition(std::move(cond)), iteration(std::move(iter)), stmt(std::move(statement)) {}
+size_t VariableDeclarator::getInitialsCount() const { return initials.size(); }
+Exp* VariableDeclarator::getInitial(size_t index) const { return initials.at(index).get(); }
+void VariableDeclarator::addInitial(std::unique_ptr<Exp> init) { initials.push_back(std::move(init)); }
+const std::vector<std::unique_ptr<Exp>>& VariableDeclarator::getInitials() const { return initials; }
 
-Stmt* ForStmt::getInitial() const { return initial.get(); }
-std::unique_ptr<Stmt> ForStmt::releaseInitial() { return std::move(initial); }
-void ForStmt::setInitial(std::unique_ptr<Stmt> init) { initial = std::move(init); }
+// VariableDecl
+VariableDecl::VariableDecl(int sl)
+    : Stmt(sl), storageClass(StorageClass::NONE), typeQualifier(TypeQualifier::NONE) {}
 
-Exp* ForStmt::getCondition() const { return condition.get(); }
-std::unique_ptr<Exp> ForStmt::releaseCondition() { return std::move(condition); }
-void ForStmt::setCondition(std::unique_ptr<Exp> cond) { condition = std::move(cond); }
+StorageClass VariableDecl::getStorageClass() const { return storageClass; }
 
-Exp* ForStmt::getIteration() const { return iteration.get(); }
-std::unique_ptr<Exp> ForStmt::releaseIteration() { return std::move(iteration); }
-void ForStmt::setIteration(std::unique_ptr<Exp> iter) { iteration = std::move(iter); }
+void VariableDecl::setStorageClass(StorageClass sc) {
+    storageClass = sc;
+}
 
-Stmt* ForStmt::getStmt() const { return stmt.get(); }
-std::unique_ptr<Stmt> ForStmt::releaseStmt() { return std::move(stmt); }
-void ForStmt::setStmt(std::unique_ptr<Stmt> statement) { stmt = std::move(statement); }
+TypeQualifier VariableDecl::getTypeQualifier() const {
+    return typeQualifier;
+}
 
-// ---- IfStmt ----
-IfStmt::IfStmt(int line, std::unique_ptr<Exp> cond, std::unique_ptr<Stmt> trueStatement, std::unique_ptr<Stmt> falseStatement)
-    : Stmt(line), condition(std::move(cond)), trueStmt(std::move(trueStatement)), falseStmt(std::move(falseStatement)) {}
+void VariableDecl::setTypeQualifier(TypeQualifier tq) {
+    typeQualifier = tq;
+}
 
-Exp* IfStmt::getCondition() const { return condition.get(); }
-std::unique_ptr<Exp> IfStmt::releaseCondition() { return std::move(condition); }
-void IfStmt::setCondition(std::unique_ptr<Exp> cond) { condition = std::move(cond); }
+BasicType VariableDecl::getDeclType() const {
+    return DeclType;
+}
 
-Stmt* IfStmt::getTrueStmt() const { return trueStmt.get(); }
-std::unique_ptr<Stmt> IfStmt::releaseTrueStmt() { return std::move(trueStmt); }
-void IfStmt::setTrueStmt(std::unique_ptr<Stmt> trueStatement) { trueStmt = std::move(trueStatement); }
+void VariableDecl::setDeclType(BasicType type) {
+    DeclType = type;
+}
 
-Stmt* IfStmt::getFalseStmt() const { return falseStmt.get(); }
-std::unique_ptr<Stmt> IfStmt::releaseFalseStmt() { return std::move(falseStmt); }
-void IfStmt::setFalseStmt(std::unique_ptr<Stmt> falseStatement) { falseStmt = std::move(falseStatement); }
+// VariableDecl
+size_t VariableDecl::getDeclaratorsCount() const { return declarators.size(); }
+VariableDeclarator* VariableDecl::getDeclarator(size_t index) const { return declarators.at(index).get(); }
+void VariableDecl::addDeclarator(std::unique_ptr<VariableDeclarator> decl) { declarators.push_back(std::move(decl)); }
+const std::vector<std::unique_ptr<VariableDeclarator>>& VariableDecl::getDeclarators() const { return declarators; }
 
-// ---- JumpStmt ----
-JumpStmt::JumpStmt(int line, JumpStmtType jumpType, std::unique_ptr<Exp> retExp)
-    : Stmt(line), jumpStmtType(jumpType), returnExp(std::move(retExp)) {}
+// FormatParam
+FormatParam::FormatParam()
+    : dimension(0) {}
 
-JumpStmt::JumpStmtType JumpStmt::getJumpStmtType() const { return jumpStmtType; }
-void JumpStmt::setJumpStmtType(JumpStmtType jumpType) { jumpStmtType = jumpType; }
+const std::string& FormatParam::getIdentifier() const { return identifier; }
 
-Exp* JumpStmt::getReturnExp() const { return returnExp.get(); }
-std::unique_ptr<Exp> JumpStmt::releaseReturnExp() { return std::move(returnExp); }
-void JumpStmt::setReturnExp(std::unique_ptr<Exp> retExp) { returnExp = std::move(retExp); }
+void FormatParam::setIdentifier(const std::string& id) {
+    identifier = id;
+}
 
-// ---- BlockStmt ----
-BlockStmt::BlockStmt(int line, std::vector<std::unique_ptr<Stmt>> statements)
-    : Stmt(line), endline(0), stmts(std::move(statements)) {}
+BasicType FormatParam::getParamType() const {
+    return paramType;
+}
+
+void FormatParam::setParamType(BasicType type) {
+    paramType = type;
+}
+
+int FormatParam::getDimension() const {
+    return dimension;
+}
+
+void FormatParam::setDimension(int dim) {
+    dimension = dim;
+}
+
+void FormatParam::increaseDimension() {
+    dimension++;
+}
+
+// FormatParam
+size_t FormatParam::getDimensionSizesCount() const { return dimensionSizes.size(); }
+Exp* FormatParam::getDimensionSize(size_t index) const { return dimensionSizes.at(index).get(); }
+void FormatParam::addDimensionSize(std::unique_ptr<Exp> dimSize) { dimensionSizes.push_back(std::move(dimSize)); }
+const std::vector<std::unique_ptr<Exp>>& FormatParam::getDimensionSizes() const { return dimensionSizes; }
+
+// FunctionDecl
+FunctionDecl::FunctionDecl(int sl)
+    : Stmt(sl) {}
+
+const std::string& FunctionDecl::getIdentifier() const { return identifier; }
+
+void FunctionDecl::setIdentifier(const std::string& id) {
+    identifier = id;
+}
+
+BasicType FunctionDecl::getFuncType() const {
+    return funcType;
+}
+
+void FunctionDecl::setFuncType(BasicType fType) {
+    funcType = fType;
+}
+
+// FunctionDecl
+size_t FunctionDecl::getFormatParamsCount() const { return formatParams.size(); }
+FormatParam* FunctionDecl::getFormatParam(size_t index) const { return formatParams.at(index).get(); }
+void FunctionDecl::addFormatParam(std::unique_ptr<FormatParam> param) { formatParams.push_back(std::move(param)); }
+const std::vector<std::unique_ptr<FormatParam>>& FunctionDecl::getFormatParams() const { return formatParams; }
+
+Stmt* FunctionDecl::getFunctionBody() const {
+    return functionBody.get();
+}
+
+std::unique_ptr<Stmt> FunctionDecl::releaseFunctionBody() {
+    return std::move(functionBody);
+}
+
+void FunctionDecl::setFunctionBody(std::unique_ptr<Stmt> s) {
+    functionBody = std::move(s);
+}
+
+ExpStmt::ExpStmt(int sl)
+    : Stmt(sl), exp(nullptr) {}
+
+Exp* ExpStmt::getExp() const {
+    return exp.get();
+}
+
+std::unique_ptr<Exp> ExpStmt::releaseExp() {
+    return std::move(exp);
+}
+
+void ExpStmt::setExp(std::unique_ptr<Exp> e) {
+    exp = std::move(e);
+}
+
+ForStmt::ForStmt(int sl)
+    : Stmt(sl), initial(nullptr), condition(nullptr), iteration(nullptr), stmt(nullptr) {}
+
+Stmt* ForStmt::getInitial() const {
+    return initial.get();
+}
+
+std::unique_ptr<Stmt> ForStmt::releaseInitial() {
+    return std::move(initial);
+}
+
+void ForStmt::setInitial(std::unique_ptr<Stmt> s) {
+    initial = std::move(s);
+}
+
+Exp* ForStmt::getCondition() const {
+    return condition.get();
+}
+
+std::unique_ptr<Exp> ForStmt::releaseCondition() {
+    return std::move(condition);
+}
+
+void ForStmt::setCondition(std::unique_ptr<Exp> cond) {
+    condition = std::move(cond);
+}
+
+Exp* ForStmt::getIteration() const {
+    return iteration.get();
+}
+
+std::unique_ptr<Exp> ForStmt::releaseIteration() {
+    return std::move(iteration);
+}
+
+void ForStmt::setIteration(std::unique_ptr<Exp> iter) {
+    iteration = std::move(iter);
+}
+
+Stmt* ForStmt::getBody() const {
+    return stmt.get();
+}
+
+std::unique_ptr<Stmt> ForStmt::releaseBody() {
+    return std::move(stmt);
+}
+
+void ForStmt::setBody(std::unique_ptr<Stmt> s) {
+    stmt = std::move(s);
+}
+
+IfStmt::IfStmt(int sl)
+    : Stmt(sl), condition(nullptr), trueStmt(nullptr), falseStmt(nullptr) {}
+
+Exp* IfStmt::getCondition() const {
+    return condition.get();
+}
+
+std::unique_ptr<Exp> IfStmt::releaseCondition() {
+    return std::move(condition);
+}
+
+void IfStmt::setCondition(std::unique_ptr<Exp> cond) {
+    condition = std::move(cond);
+}
+
+Stmt* IfStmt::getTrueStmt() const {
+    return trueStmt.get();
+}
+
+std::unique_ptr<Stmt> IfStmt::releaseTrueStmt() {
+    return std::move(trueStmt);
+}
+
+void IfStmt::setTrueStmt(std::unique_ptr<Stmt> trueStatement) {
+    trueStmt = std::move(trueStatement);
+}
+
+Stmt* IfStmt::getFalseStmt() const {
+    return falseStmt.get();
+}
+
+std::unique_ptr<Stmt> IfStmt::releaseFalseStmt() {
+    return std::move(falseStmt);
+}
+
+void IfStmt::setFalseStmt(std::unique_ptr<Stmt> falseStatement) {
+    falseStmt = std::move(falseStatement);
+}
+
+BreakStmt::BreakStmt(int sl)
+    : Stmt(sl) {}
+
+ContinueStmt::ContinueStmt(int sl)
+    : Stmt(sl) {}
+
+ReturnStmt::ReturnStmt(int sl)
+    : Stmt(sl), returnExp(nullptr) {}
+
+Exp* ReturnStmt::getReturnExp() const {
+    return returnExp.get();
+}
+
+std::unique_ptr<Exp> ReturnStmt::releaseReturnExp() {
+    return std::move(returnExp);
+}
+
+void ReturnStmt::setReturnExp(std::unique_ptr<Exp> reType) {
+    returnExp = std::move(reType);
+}
+
+BlockStmt::BlockStmt(int sl)
+    : Stmt(sl), endline(0) {}
 
 int BlockStmt::getEndLine() const { return endline; }
-void BlockStmt::setEndLine(int l) { endline = l; }
 
+void BlockStmt::setEndLine(int el) {
+    endline = el;
+}
+
+// BlockStmt
 size_t BlockStmt::getStmtsCount() const { return stmts.size(); }
-Stmt* BlockStmt::getStmt(size_t index) const { return index < stmts.size() ? stmts[index].get() : nullptr; }
-void BlockStmt::addStmt(std::unique_ptr<Stmt> stmt_) { if (stmt_) stmts.push_back(std::move(stmt_)); }
+Stmt* BlockStmt::getStmt(size_t index) const { return stmts.at(index).get(); }
+void BlockStmt::addStmt(std::unique_ptr<Stmt> s) { stmts.push_back(std::move(s)); }
 const std::vector<std::unique_ptr<Stmt>>& BlockStmt::getStmts() const { return stmts; }
+
+/*
+ * CompUnit
+ */
+
+CompUnit::CompUnit() {}
+
+// CompUnit
+size_t CompUnit::getGlobalVarDeclCount() const { return globalVarDecl.size(); }
+VariableDecl* CompUnit::getGlobalVarDecl(size_t index) const { return globalVarDecl.at(index).get(); }
+void CompUnit::addGlobalVarDecl(std::unique_ptr<VariableDecl> decl) { globalVarDecl.push_back(std::move(decl)); }
+const std::vector<std::unique_ptr<VariableDecl>>& CompUnit::getGlobalVarDecls() const { return globalVarDecl; }
+
+size_t CompUnit::getFuncDeclCount() const { return funcDecl.size(); }
+FunctionDecl* CompUnit::getFuncDecl(size_t index) const { return funcDecl.at(index).get(); }
+void CompUnit::addFuncDecl(std::unique_ptr<FunctionDecl> decl) { funcDecl.push_back(std::move(decl)); }
+const std::vector<std::unique_ptr<FunctionDecl>>& CompUnit::getFuncDecls() const { return funcDecl; }
+
+FunctionDecl* CompUnit::getMainFuncDecl() const {
+    return mainFuncDecl.get();
+}
+
+std::unique_ptr<FunctionDecl> CompUnit::releaseMainFuncDecl() {
+    return std::move(mainFuncDecl);
+}
+
+void CompUnit::setMainFuncDecl(std::unique_ptr<FunctionDecl> decl) {
+    mainFuncDecl = std::move(decl);
+}

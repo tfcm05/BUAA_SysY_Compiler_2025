@@ -1,66 +1,64 @@
-#include<iostream>
 #include"../../include/front/GrammaticalAnalysis.h"
-#include"../../include/front/Token.h"
-#include"../../include/front/LexicalAnalysis.h"
 #include"../../include/Error.h"
-#include <fstream>
-#include <sstream>
+#include<fstream>
+#include<sstream>
+#include<iostream>
 
-Parse::Parse(LexicalAnalysis& lex): lexicalAnalysis(lex) {
+Parser::Parser(LexicalAnalysis& lex): lexicalAnalysis(lex) {
     initial();
 }
 
-std::unique_ptr<AstNode> Parse::parse() {
+std::unique_ptr<AstNode> Parser::parse() {
     return parseCompUnit();
 }
 
 // ----- Top-level: compilation unit -----
-std::unique_ptr<CompUnit> Parse::parseCompUnit() {
+std::unique_ptr<CompUnit> Parser::parseCompUnit() {
     auto node = std::make_unique<CompUnit>();
 
     while (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
-        node->addGlobalVarDefStmt(parseVarDefStmt());
+        node->addGlobalVarDecl(parseVarDecl());
     }
 
     while (match(VOIDTK) || (match(INTTK) && match(IDENFR, 1))) {
-        node->addFuncDefStmt(parseFuncDefStmt());
+        node->addFuncDecl(parseFuncDecl());
     }
 
-    node->setMainFuncDef(parseMainFuncDef());
+    node->setMainFuncDecl(parseMainFuncDecl());
 
     return node;
 }
 
 // ----- Initialization & token helpers -----
-void Parse::initial() {
+void Parser::initial() {
     preLine = 0;
     currentToken = lexicalAnalysis.getNextToken();
     lexerLog(currentToken);
 }
 
-void Parse::advance() {
+void Parser::advance() {
     preLine = currentToken.getLine();
     currentToken = lexicalAnalysis.getNextToken();
     lexerLog(currentToken);
 }
 
-Token Parse::peekNext() {
+Token Parser::peekNext() {
     return lexicalAnalysis.peekNextToken();
 }
 
-Token Parse::peekSecond() {
+Token Parser::peekSecond() {
     return lexicalAnalysis.peekSecondToken();
 }
 
-const Token& Parse::peekNextRef() {
+const Token& Parser::peekNextRef() {
     return lexicalAnalysis.peekNextTokenRef();
 }
 
-const Token& Parse::peekSecondRef() {
+const Token& Parser::peekSecondRef() {
     return lexicalAnalysis.peekSecondTokenRef();
 }
 
-bool Parse::match(TokenType expected, int mode) {
+bool Parser::match(TokenType expected, int mode) {
     switch (mode) {
         case 0 : return CURRENT_TYPE == expected;
         case 1 : return NEXT_TYPE == expected;
@@ -69,11 +67,11 @@ bool Parse::match(TokenType expected, int mode) {
     }
 }
 
-bool Parse::match(TokenType expected) {
+bool Parser::match(TokenType expected) {
     return CURRENT_TYPE == expected;
 }
 
-void Parse::expect(TokenType expect) {
+void Parser::expect(TokenType expect) {
     if (!match(expect)) {
         // 错误处理
         if (expect == SEMICN) {
@@ -88,26 +86,37 @@ void Parse::expect(TokenType expect) {
     }
 }
 
-// ----- 变量和定义相关 -----
-std::unique_ptr<VariableDefStmt> Parse::parseVarDefStmt() {
-    auto node = std::make_unique<VariableDefStmt>(CURRENT_LINE);
+// ----- 类型相关 -----
+
+BasicType Parser::parseBasicType() {
+    if (match(INTTK)) {
+        expect(INTTK);
+        return BasicType::INT;
+    } else {
+        expect(VOIDTK);
+        return BasicType::VOID;
+    }
+}
+
+// ----- 声明相关 -----
+
+std::unique_ptr<VariableDecl> Parser::parseVarDecl() {
+    auto node = std::make_unique<VariableDecl>(CURRENT_LINE);
 
     if (match(CONSTTK)) {
         expect(CONSTTK);
-        node->setConstFlag(true);
+        node->setTypeQualifier(TypeQualifier::CONST);
     } else if (match(STATICTK)) {
         expect(STATICTK);
-        node->setStaticFlag(true);
+        node->setStorageClass(StorageClass::STATIC);
     }
 
-    // BType
-    node->setVarType(BasicType::INT);
-    expect(INTTK);
+    node->setDeclType(parseBasicType());
 
-    node->addDef(parseVarDef());
+    node->addDeclarator(parseVarDeclarator());
     while (match(COMMA)) {
         expect(COMMA);
-        node->addDef(parseVarDef());
+        node->addDeclarator(parseVarDeclarator());
     }
 
     expect(SEMICN);
@@ -115,14 +124,18 @@ std::unique_ptr<VariableDefStmt> Parse::parseVarDefStmt() {
     return node;
 }
 
-std::unique_ptr<VariableDef> Parse::parseVarDef() {
-    auto node = std::make_unique<VariableDef>(CURRENT_VALUE);
+std::unique_ptr<VariableDeclarator> Parser::parseVarDeclarator() {
+    auto node = std::make_unique<VariableDeclarator>();
+
+    node->setIdentifier(CURRENT_VALUE);
     expect(IDENFR);
 
-    if (match(LBRACK)) {
+    while (match(LBRACK)) {
         expect(LBRACK);
-        node->setIsArray(true);
-        node->setArraySize(parseAddExp());
+        node->increaseDimension();
+        if (!match(RBRACK)) {
+            node->addDimensionSize(parseCommaExp());
+        }
         expect(RBRACK);
     }
 
@@ -137,96 +150,106 @@ std::unique_ptr<VariableDef> Parse::parseVarDef() {
     return node;
 }
 
-std::vector<std::unique_ptr<Exp>> Parse::parseInitVal() {
+std::vector<std::unique_ptr<Exp>> Parser::parseInitVal() {
     std::vector<std::unique_ptr<Exp>> vals;
     if (match(LBRACE)) {
         expect(LBRACE);
         if (!match(RBRACE)) {
-            vals.push_back(parseExpIgnoreComma());
+            vals.push_back(parseAssignExp());
             while (match(COMMA)) {
                 expect(COMMA);
                 if (match(RBRACE)) break;
-                vals.push_back(parseExpIgnoreComma());
+                vals.push_back(parseAssignExp());
             }
         }
         expect(RBRACE);
     } else {
-        vals.push_back(parseExp());
+        vals.push_back(parseAssignExp());
     }
     return vals;
 }
 
-// ----- 函数相关 -----
-std::unique_ptr<FunctionDefStmt> Parse::parseFuncDefStmt() {
-    // funcType
-    auto node = std::make_unique<FunctionDefStmt>(CURRENT_LINE, match(VOIDTK) ? BasicType::VOID : BasicType::INT);
-    expect(node->getFuncType() == BasicType::VOID ? VOIDTK : INTTK);
+
+std::unique_ptr<FunctionDecl> Parser::parseFuncDecl() {
+    auto node = std::make_unique<FunctionDecl>(CURRENT_LINE);
+
+    node->setFuncType(parseBasicType());
 
     node->setIdentifier(CURRENT_VALUE);
     expect(IDENFR);
 
     expect(LPARENT);
     if (!match(RPARENT)) {
-        node->setFormatParams(parseFuncFParams());
+        auto FormatParams = parseFuncFParams();
+        for (auto& fParam : FormatParams) {
+            node->addFormatParam(std::move(fParam));
+        }
     }
     expect(RPARENT);
 
-    node->setStmt(parseBlock());
-
+    node->setFunctionBody(parseBlock());
+    
     return node;
 }
 
-std::unique_ptr<FunctionDefStmt> Parse::parseMainFuncDef() {
-    auto node = std::make_unique<FunctionDefStmt>(CURRENT_LINE, BasicType::INT);
+std::unique_ptr<FunctionDecl> Parser::parseMainFuncDecl() {
+    auto node = std::make_unique<FunctionDecl>(CURRENT_LINE);
+
+    node->setFuncType(BasicType::INT);
     expect(INTTK);
 
     node->setIdentifier("main");
     expect(MAINTK);
 
-    node->setFormatParams({});
     expect(LPARENT);
     expect(RPARENT);
 
-    node->setStmt(parseBlock());
+    node->setFunctionBody(parseBlock());
 
     return node;
 }
 
-std::vector<std::unique_ptr<Param>> Parse::parseFuncFParams() {
-    std::vector<std::unique_ptr<Param>> params;
+std::vector<std::unique_ptr<FormatParam>> Parser::parseFuncFParams() {
+    std::vector<std::unique_ptr<FormatParam>> params;
     params.push_back(parseFuncFParam());
     while (match(COMMA)) {
         expect(COMMA);
         params.push_back(parseFuncFParam());
     }
+    
     return params;
 }
 
-std::unique_ptr<Param> Parse::parseFuncFParam() {
-    expect(INTTK);
-    std::string id = CURRENT_VALUE;
-    expect(IDENFR);
-    bool isArr = false;
-    if (match(LBRACK)) {
-        expect(LBRACK);
-        expect(RBRACK);
-        isArr = true;
-    }
-    return std::make_unique<Param>(id, BasicType::INT, isArr);
-}
+std::unique_ptr<FormatParam> Parser::parseFuncFParam() {
+    auto node = std::make_unique<FormatParam>();
 
-std::vector<std::unique_ptr<Exp>> Parse::parseFuncRParams() {
+    node->setParamType(parseBasicType());
+
+    node->setIdentifier(CURRENT_VALUE);
+    expect(IDENFR);
+    while (match(LBRACK)) {
+        expect(LBRACK);
+        node->increaseDimension();
+        if (!match(RBRACK)) {
+            node->addDimensionSize(parseCommaExp());
+        }
+        expect(RBRACK);
+    }
+
+    return node;
+}
+std::vector<std::unique_ptr<Exp>> Parser::parseFuncRParams() {
     std::vector<std::unique_ptr<Exp>> params;
-    params.push_back(parseExpIgnoreComma());
+    params.push_back(parseAssignExp());
     while (match(COMMA)) {
         expect(COMMA);
-        params.push_back(parseExpIgnoreComma());
+        params.push_back(parseAssignExp());
     }
     return params;
 }
 
 // ----- 语句与语句块 -----
-std::unique_ptr<BlockStmt> Parse::parseBlock() {
+std::unique_ptr<BlockStmt> Parser::parseBlock() {
     auto node = std::make_unique<BlockStmt>(CURRENT_LINE);
     
     expect(LBRACE);
@@ -241,10 +264,11 @@ std::unique_ptr<BlockStmt> Parse::parseBlock() {
     return node;
 }
 
-std::unique_ptr<ExpStmt> Parse::parseExpStmt() {
+std::unique_ptr<ExpStmt> Parser::parseExpStmt() {
 
     if (!match(SEMICN)) {
-        auto node = std::make_unique<ExpStmt>(CURRENT_LINE, parseExp());
+        auto node = std::make_unique<ExpStmt>(CURRENT_LINE);
+        node->setExp(parseCommaExp());
         expect(SEMICN);
         return node;
     }
@@ -253,12 +277,12 @@ std::unique_ptr<ExpStmt> Parse::parseExpStmt() {
     return nullptr;
 }
 
-std::unique_ptr<IfStmt> Parse::parseIfStmt() {
+std::unique_ptr<IfStmt> Parser::parseIfStmt() {
     auto node = std::make_unique<IfStmt>(CURRENT_LINE);
 
     expect(IFTK);
     expect(LPARENT);
-    node->setCondition(parseExp());
+    node->setCondition(parseCommaExp());
     expect(RPARENT);
     node->setTrueStmt(parseStmt());
     if (match(ELSETK)) {
@@ -269,66 +293,72 @@ std::unique_ptr<IfStmt> Parse::parseIfStmt() {
     return node;
 }
 
-std::unique_ptr<ForStmt> Parse::parseForStmt() {
+std::unique_ptr<ForStmt> Parser::parseForStmt() {
     auto node = std::make_unique<ForStmt>(CURRENT_LINE);
 
     expect(FORTK);
     expect(LPARENT);
+    node->setInitial(parseStmt());
     if (!match(SEMICN)) {
-        if (match(CONSTTK) || match(STATICTK) || match(INTTK)) {
-            node->setInitial(parseVarDefStmt());
-        } else {
-            node->setInitial(parseExpStmt());
-        }
-    }
-    if (!match(SEMICN)) {
-        node->setCondition(parseExp());
+        node->setCondition(parseCommaExp());
     } 
     expect(SEMICN);
     if (!match(SEMICN)) {
-        node->setIteration(parseExp());
+        node->setIteration(parseCommaExp());
     }
     expect(RPARENT);
-    node->setStmt(parseStmt());
+    node->setBody(parseStmt());
 
     return node;
 }
 
-std::unique_ptr<JumpStmt> Parse::parseJumpStmt() {
-    auto node = std::make_unique<JumpStmt>(CURRENT_LINE,
-        match(RETURNTK) ? JumpStmt::JumpStmtType::RETURN :
-        (match(BREAKTK) ? JumpStmt::JumpStmtType::BREAK :
-        JumpStmt::JumpStmtType::CONTINUE));
-    
-    if (match(RETURNTK)) {
-        expect(RETURNTK);
-        if (!match(SEMICN)) {
-            node->setReturnExp(parseExp());
-        }
-    } else if (match(BREAKTK)) {
-        expect(BREAKTK);
-    } else if (match(CONTINUETK)) {
-        expect(CONTINUETK);
-    } else {
-        // 错误处理
-        return nullptr;
-    }
+std::unique_ptr<BreakStmt> Parser::parseBreakStmt() {
+    auto node = std::make_unique<BreakStmt>(CURRENT_LINE);
+
+    expect(BREAKTK);
     expect(SEMICN);
 
     return node;
 }
 
-std::unique_ptr<Stmt> Parse::parseStmt() {
+std::unique_ptr<ContinueStmt> Parser::parseContinueStmt() {
+    auto node = std::make_unique<ContinueStmt>(CURRENT_LINE);
+
+    expect(CONTINUETK);
+    expect(SEMICN);
+
+    return node;
+}
+
+std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
+    auto node = std::make_unique<ReturnStmt>(CURRENT_LINE);
+
+    expect(RETURNTK);
+    if (!match(SEMICN)) {
+        node->setReturnExp(parseCommaExp());
+    }
+    expect(SEMICN);
+    
+    return node;
+}
+
+std::unique_ptr<Stmt> Parser::parseStmt() {
     if (match(LBRACE)) {
         return parseBlock();
-    } else if (match(CONSTTK) || match(STATICTK) || match(INTTK)) {
-        return parseVarDefStmt();
+    } else if (match(INTTK) || match(STATICTK) || match(CONSTTK)) {
+        return parseVarDecl();
     } else if (match(IFTK)) {
         return parseIfStmt();
     } else if (match(FORTK)) {
         return parseForStmt();
     } else if (match(BREAKTK) || match(CONTINUETK) || match(RETURNTK)) {
-        return parseJumpStmt();
+        if (match(BREAKTK) ) {
+            return parseBreakStmt();
+        } else if (match(CONTINUETK)) {
+            return parseContinueStmt();
+        } else  {  
+            return parseReturnStmt();
+        }
     } else {
         if (match(SEMICN)) {
             expect(SEMICN);
@@ -340,11 +370,7 @@ std::unique_ptr<Stmt> Parse::parseStmt() {
 }
 
 // ----- 表达式相关 -----
-std::unique_ptr<Exp> Parse::parseExp() {
-    return parseCommaExp();
-}
-
-std::unique_ptr<Exp> Parse::parseCommaExp() {
+std::unique_ptr<Exp> Parser::parseCommaExp() {
     auto node = parseAssignExp();
 
     while (match(COMMA)) {
@@ -356,11 +382,7 @@ std::unique_ptr<Exp> Parse::parseCommaExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseExpIgnoreComma() {
-    return parseAssignExp();
-}
-
-std::unique_ptr<Exp> Parse::parseAssignExp() {
+std::unique_ptr<Exp> Parser::parseAssignExp() {
     auto left = parseLOrExp();
 
     if (match(ASSIGN)) {
@@ -373,7 +395,7 @@ std::unique_ptr<Exp> Parse::parseAssignExp() {
     return left;
 }
 
-std::unique_ptr<Exp> Parse::parseLOrExp() {
+std::unique_ptr<Exp> Parser::parseLOrExp() {
     auto node = parseLAndExp();
     while (match(OR)) {
         expect(OR);
@@ -383,7 +405,7 @@ std::unique_ptr<Exp> Parse::parseLOrExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseLAndExp() {
+std::unique_ptr<Exp> Parser::parseLAndExp() {
     auto node = parseEqExp();
     while (match(AND)) {
         expect(AND);
@@ -393,7 +415,7 @@ std::unique_ptr<Exp> Parse::parseLAndExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseEqExp() {
+std::unique_ptr<Exp> Parser::parseEqExp() {
     auto node = parseRelExp();
     while (match(EQL) || match(NEQ)) {
         if (match(EQL)) {
@@ -409,7 +431,7 @@ std::unique_ptr<Exp> Parse::parseEqExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseRelExp() {
+std::unique_ptr<Exp> Parser::parseRelExp() {
     auto node = parseAddExp();
     while (match(GRE) || match(GEQ) || match(LSS) || match(LEQ)) {
         if (match(GRE)) {
@@ -433,7 +455,7 @@ std::unique_ptr<Exp> Parse::parseRelExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseAddExp() {
+std::unique_ptr<Exp> Parser::parseAddExp() {
     auto node = parseMulExp();
 
     while (match(PLUS) || match(MINU)) {
@@ -451,7 +473,7 @@ std::unique_ptr<Exp> Parse::parseAddExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseMulExp() {
+std::unique_ptr<Exp> Parser::parseMulExp() {
     auto node = parseUnaryExp();
 
     while (match(MULT) || match(DIV) || match(MOD)) {
@@ -473,61 +495,62 @@ std::unique_ptr<Exp> Parse::parseMulExp() {
     return node;
 }
 
-std::unique_ptr<Exp> Parse::parseUnaryExp() {
+std::unique_ptr<Exp> Parser::parseUnaryExp() {
     if (match(PLUS)) {
         expect(PLUS);
-        return std::make_unique<UnaryExp>(UnaryExp::Op::PLUS, parseUnaryExp());
+        return std::make_unique<UnaryExp>(UnaryExp::UnaryOp::PLUS, parseUnaryExp());
     } else if (match(MINU)) {
         expect(MINU);
-        return std::make_unique<UnaryExp>(UnaryExp::Op::MINU, parseUnaryExp());
+        return std::make_unique<UnaryExp>(UnaryExp::UnaryOp::MINU, parseUnaryExp());
     } else if (match(NOT)) {
         expect(NOT);
-        return std::make_unique<UnaryExp>(UnaryExp::Op::NOT, parseUnaryExp());
+        return std::make_unique<UnaryExp>(UnaryExp::UnaryOp::NOT, parseUnaryExp());
     } else {
-        return parsePrimaryExp();
+        return parsePostfixExp();
     }
 }
 
-std::unique_ptr<Exp> Parse::parsePrimaryExp() {
+std::unique_ptr<Exp> Parser::parsePostfixExp() {
+    auto node = parsePrimaryExp();
+    while (match(LBRACK) || match(LPARENT)) {
+        if (match(LBRACK)) {
+            expect(LBRACK);
+            auto postfix = parseCommaExp();
+            expect(RBRACK);
+            node = std::make_unique<SubscriptExp>(std::move(node), std::move(postfix));
+        } else {
+            expect(LPARENT);
+            auto postfix = parseFuncRParams();
+            expect(RPARENT);
+            node = std::make_unique<FunctionCallExp>(std::move(node), std::move(postfix));
+        }
+    }
+    return node;
+}
+
+std::unique_ptr<Exp> Parser::parsePrimaryExp() {
     if (match(LPARENT)) {
         expect(LPARENT);
-        auto e = parseExp();
+        auto node = parseCommaExp();
         expect(RPARENT);
-        return e;
+        return node;
     } else if (match(INTCON) || match(STRCON)) {
         return parseLiteralExp();
     } else if (match(IDENFR)) {
-        std::string id = CURRENT_VALUE;
-        expect(IDENFR);
-
-        // function call
-        if (match(LPARENT)) {
-            expect(LPARENT);
-            std::vector<std::unique_ptr<Exp>> params;
-            if (!match(RPARENT)) {
-                params = parseFuncRParams();
-            }
-            expect(RPARENT);
-            auto func = std::make_unique<IdentifierExp>(id);
-            return std::make_unique<FunctionCallExp>(std::move(func), std::move(params));
-        }
-
-        // array subscript
-        if (match(LBRACK)) {
-            expect(LBRACK);
-            auto idx = parseExp();
-            expect(RBRACK);
-            auto base = std::make_unique<IdentifierExp>(id);
-            return std::make_unique<SubscriptExp>(std::move(base), std::move(idx));
-        }
-
-        return std::make_unique<IdentifierExp>(id);
+        return parseIdentifierExp();
+    } else {
+        return nullptr;
     }
 
-    return nullptr;
 }
 
-std::unique_ptr<Exp> Parse::parseLiteralExp() {
+std::unique_ptr<Exp> Parser::parseIdentifierExp() {
+    auto idExp = std::make_unique<IdentifierExp>(CURRENT_VALUE);
+    expect(IDENFR);
+    return idExp;
+}
+
+std::unique_ptr<Exp> Parser::parseLiteralExp() {
     if (match(INTCON)) {
         int val = std::stoi(CURRENT_VALUE);
         expect(INTCON);
@@ -541,7 +564,7 @@ std::unique_ptr<Exp> Parse::parseLiteralExp() {
 }
 
 // ----- AST printing for debugging -----
-void Parse::parserLog(const AstNode* root) const {
+void Parser::parserLog(const AstNode* root) const {
     std::ofstream ofs("parser.txt");
     if (!ofs.is_open()) return;
 
@@ -553,20 +576,47 @@ void Parse::parserLog(const AstNode* root) const {
         std::ofstream& ofs;
         decltype(indent)& indentFn;
 
+        const char* basicTypeName(BasicType t) const {
+            switch (t) {
+                case BasicType::INT:  return "INT";
+                case BasicType::VOID: return "VOID";
+                default:              return "UNKNOWN";
+            }
+        }
+
+        const char* binOpName(BinaryExp::BinaryOp op) const {
+            switch (op) {
+                case BinaryExp::BinaryOp::PLUS:   return "+";
+                case BinaryExp::BinaryOp::MINU:   return "-";
+                case BinaryExp::BinaryOp::MULT:   return "*";
+                case BinaryExp::BinaryOp::DIV:    return "/";
+                case BinaryExp::BinaryOp::MOD:    return "%";
+                case BinaryExp::BinaryOp::ASSIGN: return "=";
+                case BinaryExp::BinaryOp::OR:     return "||";
+                case BinaryExp::BinaryOp::AND:    return "&&";
+                case BinaryExp::BinaryOp::EQL:    return "==";
+                case BinaryExp::BinaryOp::NEQ:    return "!=";
+                case BinaryExp::BinaryOp::GRE:    return ">";
+                case BinaryExp::BinaryOp::GEQ:    return ">=";
+                case BinaryExp::BinaryOp::LSS:    return "<";
+                case BinaryExp::BinaryOp::LEQ:    return "<=";
+                case BinaryExp::BinaryOp::COMMA:  return ",";
+                default:                           return "?";
+            }
+        }
+
         void printNode(const AstNode* node, int lvl) {
             if (!node) {
                 ofs << indentFn(lvl) << "null\n";
                 return;
             }
 
-            // Expressions
+            // ===== Expressions =====
             if (auto n = dynamic_cast<const LiteralExp*>(node)) {
-                if (n->isString()) {
+                if (n->getLiteralType() == LiteralExp::LiteralType::STRING) {
                     ofs << indentFn(lvl) << "String: " << n->getStringValue() << "\n";
-                    return;
                 } else {
                     ofs << indentFn(lvl) << "Integer: " << n->getIntValue() << "\n";
-                    return;
                 }
                 return;
             }
@@ -594,36 +644,17 @@ void Parse::parserLog(const AstNode* root) const {
             }
             if (auto u = dynamic_cast<const UnaryExp*>(node)) {
                 ofs << indentFn(lvl) << "UnaryExp: ";
-                switch (u->getOp()) {
-                    case UnaryExp::Op::PLUS: ofs << "+"; break;
-                    case UnaryExp::Op::MINU: ofs << "-"; break;
-                    case UnaryExp::Op::NOT:  ofs << "!"; break;
+                switch (u->getUnaryOp()) {
+                    case UnaryExp::UnaryOp::PLUS: ofs << "+"; break;
+                    case UnaryExp::UnaryOp::MINU: ofs << "-"; break;
+                    case UnaryExp::UnaryOp::NOT:  ofs << "!"; break;
                 }
                 ofs << "\n";
                 printNode(u->getExp(), lvl+1);
                 return;
             }
             if (auto b = dynamic_cast<const BinaryExp*>(node)) {
-                ofs << indentFn(lvl) << "BinaryExp: ";
-                switch (b->getOp()) {
-                    case BinaryExp::BinaryOp::PLUS:  ofs << "+"; break;
-                    case BinaryExp::BinaryOp::MINU:  ofs << "-"; break;
-                    case BinaryExp::BinaryOp::MULT:  ofs << "*"; break;
-                    case BinaryExp::BinaryOp::DIV:   ofs << "/"; break;
-                    case BinaryExp::BinaryOp::MOD:   ofs << "%"; break;
-                    case BinaryExp::BinaryOp::ASSIGN:ofs << "="; break;
-                    case BinaryExp::BinaryOp::OR:    ofs << "||"; break;
-                    case BinaryExp::BinaryOp::AND:   ofs << "&&"; break;
-                    case BinaryExp::BinaryOp::EQL:   ofs << "=="; break;
-                    case BinaryExp::BinaryOp::NEQ:   ofs << "!="; break;
-                    case BinaryExp::BinaryOp::GRE:   ofs << ">"; break;
-                    case BinaryExp::BinaryOp::GEQ:   ofs << ">="; break;
-                    case BinaryExp::BinaryOp::LSS:   ofs << "<"; break;
-                    case BinaryExp::BinaryOp::LEQ:   ofs << "<="; break;
-                    case BinaryExp::BinaryOp::COMMA: ofs << ","; break;
-                    default: ofs << "?"; break;
-                }
-                ofs << "\n";
+                ofs << indentFn(lvl) << "BinaryExp: " << binOpName(b->getBinaryOp()) << "\n";
                 ofs << indentFn(lvl+1) << "LHS:\n";
                 printNode(b->getLhs(), lvl+2);
                 ofs << indentFn(lvl+1) << "RHS:\n";
@@ -631,62 +662,74 @@ void Parse::parserLog(const AstNode* root) const {
                 return;
             }
 
-            // Statements and types
+            // ===== Declarations / Params =====
             if (auto cu = dynamic_cast<const CompUnit*>(node)) {
                 ofs << indentFn(lvl) << "CompUnit\n";
-                ofs << indentFn(lvl+1) << "GlobalVarDefs:\n";
-                for (size_t i = 0; i < cu->getGlobalVarDefStmtsCount(); ++i) {
-                    printNode(cu->getGlobalVarDefStmt(i), lvl+2);
+                ofs << indentFn(lvl+1) << "GlobalVarDecls:\n";
+                for (size_t i = 0; i < cu->getGlobalVarDeclCount(); ++i) {
+                    printNode(cu->getGlobalVarDecl(i), lvl+2);
                 }
-                ofs << indentFn(lvl+1) << "FuncDefs:\n";
-                for (size_t i = 0; i < cu->getFuncDefStmtsCount(); ++i) {
-                    printNode(cu->getFuncDefStmt(i), lvl+2);
+                ofs << indentFn(lvl+1) << "FuncDecls:\n";
+                for (size_t i = 0; i < cu->getFuncDeclCount(); ++i) {
+                    printNode(cu->getFuncDecl(i), lvl+2);
                 }
                 ofs << indentFn(lvl+1) << "Main:\n";
-                printNode(cu->getMainFuncDef(), lvl+2);
+                printNode(cu->getMainFuncDecl(), lvl+2);
                 return;
             }
-            if (auto vds = dynamic_cast<const VariableDefStmt*>(node)) {
-                ofs << indentFn(lvl) << "VariableDefStmt (line " << vds->getLine() << ")\n";
-                bool s = vds->isStatic(), c = vds->isConst();
-                ofs << indentFn(lvl+1) << "static=" << s << " const=" << c << "\n";
-                ofs << indentFn(lvl+1) << "Type: INT\n";
-                for (size_t i = 0; i < vds->getDefsCount(); ++i) {
-                    printNode(vds->getDef(i), lvl+1);
+            if (auto vds = dynamic_cast<const VariableDecl*>(node)) {
+                ofs << indentFn(lvl) << "VariableDecl (line " << vds->getLine() << ")\n";
+                ofs << indentFn(lvl+1) << "static=" << (vds->getStorageClass() == StorageClass::STATIC ? 1 : 0)
+                    << " const=" << (vds->getTypeQualifier() == TypeQualifier::CONST ? 1 : 0) << "\n";
+                ofs << indentFn(lvl+1) << "Type: " << basicTypeName(vds->getDeclType()) << "\n";
+                for (size_t i = 0; i < vds->getDeclaratorsCount(); ++i) {
+                    printNode(vds->getDeclarator(i), lvl+1);
                 }
                 return;
             }
-            if (auto vd = dynamic_cast<const VariableDef*>(node)) {
-                ofs << indentFn(lvl) << "VariableDef: " << vd->getIdentifier() << "\n";
-                ofs << indentFn(lvl+1) << "isArray=" << (vd->isArray() ? 1 : 0) << "\n";
-                if (vd->getArraySize()) {
-                    ofs << indentFn(lvl+1) << "ArraySize:\n";
-                    printNode(vd->getArraySize(), lvl+2);
+            if (auto vd = dynamic_cast<const VariableDeclarator*>(node)) {
+                ofs << indentFn(lvl) << "VariableDeclarator: " << vd->getIdentifier() << "\n";
+                ofs << indentFn(lvl+1) << "Dimensions: " << vd->getDimension() << "\n";
+                if ((vd->getDimensionSizesCount()) > 0) {
+                    ofs << indentFn(lvl+1) << "DimSizes:\n";
+                    for (size_t i = 0; i < vd->getDimensionSizesCount(); ++i) {
+                        printNode(vd->getDimensionSize(i), lvl+2);
+                    }
                 }
                 ofs << indentFn(lvl+1) << "Initials:\n";
-                for (size_t i = 0; i < vd->getInitialCount(); ++i) {
+                for (size_t i = 0; i < vd->getInitialsCount(); ++i) {
                     printNode(vd->getInitial(i), lvl+2);
                 }
                 return;
             }
-            if (auto fd = dynamic_cast<const FunctionDefStmt*>(node)) {
-                ofs << indentFn(lvl) << "FunctionDef (line " << fd->getLine() << "): " << fd->getIdentifier() << "\n";
-                ofs << indentFn(lvl+1) << "ReturnType: " << (fd->getFuncType() == BasicType::INT ? "INT" : "VOID") << "\n";
+            if (auto fd = dynamic_cast<const FunctionDecl*>(node)) {
+                ofs << indentFn(lvl) << "FunctionDecl (line " << fd->getLine() << "): " << fd->getIdentifier() << "\n";
+                ofs << indentFn(lvl+1) << "ReturnType: " << basicTypeName(fd->getFuncType()) << "\n";
                 ofs << indentFn(lvl+1) << "Params:\n";
                 for (size_t i = 0; i < fd->getFormatParamsCount(); ++i) {
                     printNode(fd->getFormatParam(i), lvl+2);
                 }
                 ofs << indentFn(lvl+1) << "Body:\n";
-                printNode(fd->getStmt(), lvl+2);
+                printNode(fd->getFunctionBody(), lvl+2);
                 return;
             }
-            if (auto p = dynamic_cast<const Param*>(node)) {
-                ofs << indentFn(lvl) << "Param: " << p->getIdentifier() << " type=" << (p->getParamType()==BasicType::INT?"INT":"VOID")
-                    << " isArray=" << (p->isArray()?1:0) << "\n";
+            if (auto p = dynamic_cast<const FormatParam*>(node)) {
+                ofs << indentFn(lvl) << "FormatParam: " << p->getIdentifier()
+                    << " type=" << basicTypeName(p->getParamType())
+                    << " dims=" << p->getDimension() << "\n";
+                if (p->getDimensionSizesCount() > 0) {
+                    ofs << indentFn(lvl+1) << "DimSizes:\n";
+                    for (size_t i = 0; i < p->getDimensionSizesCount(); ++i) {
+                        printNode(p->getDimensionSize(i), lvl+2);
+                    }
+                }
                 return;
             }
+
+            // ===== Statements =====
             if (auto bs = dynamic_cast<const BlockStmt*>(node)) {
-                ofs << indentFn(lvl) << "BlockStmt (line " << bs->getLine() << " - end " << bs->getEndLine() << ")\n";
+                ofs << indentFn(lvl) << "BlockStmt (line " << bs->getLine()
+                    << " - end " << bs->getEndLine() << ")\n";
                 for (size_t i = 0; i < bs->getStmtsCount(); ++i) {
                     printNode(bs->getStmt(i), lvl+1);
                 }
@@ -701,38 +744,41 @@ void Parse::parserLog(const AstNode* root) const {
             }
             if (auto fs = dynamic_cast<const ForStmt*>(node)) {
                 ofs << indentFn(lvl) << "ForStmt (line " << fs->getLine() << ")\n";
-                ofs << indentFn(lvl+1) << "Initials:\n"; printNode(fs->getInitial(), lvl+2);
+                ofs << indentFn(lvl+1) << "Initial:\n";   printNode(fs->getInitial(),   lvl+2);
                 ofs << indentFn(lvl+1) << "Condition:\n"; printNode(fs->getCondition(), lvl+2);
-                ofs << indentFn(lvl+1) << "Iterations:\n";printNode(fs->getIteration(), lvl+2);
-                ofs << indentFn(lvl+1) << "Body:\n"; printNode(fs->getStmt(), lvl+2);
+                ofs << indentFn(lvl+1) << "Iteration:\n"; printNode(fs->getIteration(), lvl+2);
+                ofs << indentFn(lvl+1) << "Body:\n";      printNode(fs->getBody(),      lvl+2);
                 return;
             }
-            if (auto js = dynamic_cast<const JumpStmt*>(node)) {
-                ofs << indentFn(lvl) << "JumpStmt (line " << js->getLine() << ") type=";
-                switch (js->getJumpStmtType()) {
-                    case JumpStmt::JumpStmtType::RETURN: ofs << "RETURN"; break;
-                    case JumpStmt::JumpStmtType::BREAK:  ofs << "BREAK"; break;
-                    case JumpStmt::JumpStmtType::CONTINUE: ofs << "CONTINUE"; break;
-                }
-                ofs << "\n";
-                if (js->getReturnExp()) {
+            if (auto rs = dynamic_cast<const ReturnStmt*>(node)) {
+                ofs << indentFn(lvl) << "ReturnStmt (line " << rs->getLine() << ")\n";
+                if (rs->getReturnExp()) {
                     ofs << indentFn(lvl+1) << "ReturnExp:\n";
-                    printNode(js->getReturnExp(), lvl+2);
+                    printNode(rs->getReturnExp(), lvl+2);
                 }
+                return;
+            }
+            if (auto br = dynamic_cast<const BreakStmt*>(node)) {
+                ofs << indentFn(lvl) << "BreakStmt (line " << br->getLine() << ")\n";
+                return;
+            }
+            if (auto ct = dynamic_cast<const ContinueStmt*>(node)) {
+                ofs << indentFn(lvl) << "ContinueStmt (line " << ct->getLine() << ")\n";
                 return;
             }
             if (auto es = dynamic_cast<const ExpStmt*>(node)) {
                 ofs << indentFn(lvl) << "ExpStmt (line " << es->getLine() << ")\n";
-                printNode(es->getExp(), lvl+1);
+                ofs << indentFn(lvl+1) << "Exp:\n";
+                printNode(es->getExp(), lvl+2);
                 return;
             }
 
             // fallback
-            ofs << indentFn(lvl) << "UnknownNode (type info)\n";
+            ofs << indentFn(lvl) << "UnknownNode\n";
         }
     };
 
-    Printer p{ofs, const_cast<decltype(indent)&>(indent)}; // indent is stateless, safe to cast
+    Printer p{ofs, const_cast<decltype(indent)&>(indent)}; // indent 无状态，安全使用
     p.printNode(root, 0);
 
     ofs.close();

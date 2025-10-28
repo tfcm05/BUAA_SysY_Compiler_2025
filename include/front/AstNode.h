@@ -7,6 +7,15 @@
 #include<string>
 #include<variant>
 
+/*
+ * this is type part
+ */
+enum class BasicType { INT, VOID };
+
+enum class StorageClass { NONE, STATIC, };
+
+enum class TypeQualifier { NONE, CONST, };
+
 class AstNode {
 public:
     virtual ~AstNode() = default;
@@ -19,20 +28,19 @@ public:
 class Exp : public AstNode { public: virtual ~Exp() = default; };
 
 class LiteralExp : public Exp {
+public:
+    enum class LiteralType { NUMBER, STRING };
 private:
+    LiteralType literalType;
     std::variant<int, std::string> value;
 public:
     LiteralExp(int val);
     LiteralExp(const std::string& val);
 
-    bool isInt() const;
-    bool isString() const;
+    LiteralType getLiteralType() const;
 
     int getIntValue() const;
     const std::string& getStringValue() const;
-
-    void setIntValue(int val);
-    void setStringValue(const std::string& val);
 };
 
 class IdentifierExp : public Exp {
@@ -49,7 +57,7 @@ private:
     std::unique_ptr<Exp> function;
     std::vector<std::unique_ptr<Exp>> RealParams;
 public:
-    FunctionCallExp(std::unique_ptr<Exp> func, std::vector<std::unique_ptr<Exp>> params);
+    FunctionCallExp(std::unique_ptr<Exp> func, std::vector<std::unique_ptr<Exp>> rParams);
 
     Exp* getFunction() const;
     std::unique_ptr<Exp> releaseFunction();
@@ -80,19 +88,19 @@ public:
 
 class UnaryExp : public Exp {
 public:
-    enum class Op { PLUS, MINU, NOT };
+    enum class UnaryOp { PLUS, MINU, NOT };
 private:
-    Op op;
+    UnaryOp unaryOp;
     std::unique_ptr<Exp> exp;
 public:
-    UnaryExp(Op operation, std::unique_ptr<Exp> expression);
+    UnaryExp(UnaryOp uop, std::unique_ptr<Exp> e);
 
-    Op getOp() const;
-    void setOp(Op operation);
+    UnaryOp getUnaryOp() const;
+    void setUnaryOp(UnaryOp uop);
 
     Exp* getExp() const;
     std::unique_ptr<Exp> releaseExp();
-    void setExp(std::unique_ptr<Exp> expression);
+    void setExp(std::unique_ptr<Exp> e);
 };
 
 class BinaryExp : public Exp {
@@ -100,21 +108,21 @@ public:
     enum class BinaryOp { PLUS, MINU, MULT, DIV, MOD, ASSIGN, OR, AND, EQL, NEQ, GRE, GEQ, LSS, LEQ, COMMA, UNKNOWN };
 private:
     std::unique_ptr<Exp> lhs;
-    BinaryOp op;
+    BinaryOp binaryOp;
     std::unique_ptr<Exp> rhs;
 public:
-    BinaryExp(std::unique_ptr<Exp> left, BinaryOp operation, std::unique_ptr<Exp> right);
+    BinaryExp(std::unique_ptr<Exp> l, BinaryOp bop, std::unique_ptr<Exp> r);
 
     Exp* getLhs() const;
     Exp* getRhs() const;
-    BinaryOp getOp() const;
+    BinaryOp getBinaryOp() const;
 
     std::unique_ptr<Exp> releaseLhs();
     std::unique_ptr<Exp> releaseRhs();
 
-    void setLhs(std::unique_ptr<Exp> left);
-    void setRhs(std::unique_ptr<Exp> right);
-    void setOp(BinaryOp operation);
+    void setLhs(std::unique_ptr<Exp> l);
+    void setRhs(std::unique_ptr<Exp> r);
+    void setBinaryOp(BinaryOp bop);
 };
 
 /* 
@@ -122,74 +130,73 @@ public:
  */
 class Stmt : public AstNode {
 private:
-    int line;
+    int startLine;
 public:
-    Stmt(int line = 0);
+    Stmt(int sl);
     int getLine() const;
-    void setLine(int l);
+    void setLine(int sl);
 };
 
-/*
- * this is type part
- */
-enum class BasicType { INT, VOID };
-
-class VariableDef : public AstNode {
+class VariableDeclarator : public AstNode {
 private:
     std::string identifier;
-    bool arrayFlag;
-    std::unique_ptr<Exp> arraySize;
-    std::vector<std::unique_ptr<Exp>> initial;
+    int dimension;
+    std::vector<std::unique_ptr<Exp>> dimensionSizes;
+    std::vector<std::unique_ptr<Exp>> initials;
 public:
-    VariableDef(const std::string& id, bool arrayFlag = false,
-             std::unique_ptr<Exp> arrSize = nullptr,
-             std::vector<std::unique_ptr<Exp>> init = {});
+    VariableDeclarator();
 
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
 
-    bool isArray() const;
-    void setIsArray(bool arrayFlag);
+    int getDimension() const;
+    void setDimension(int dim);
+    void increaseDimension();
 
-    Exp* getArraySize() const;
-    std::unique_ptr<Exp> releaseArraySize();
-    void setArraySize(std::unique_ptr<Exp> arrSize);
+    size_t getDimensionSizesCount() const;
+    Exp* getDimensionSize(size_t index) const;
+    void addDimensionSize(std::unique_ptr<Exp> dimSize);
+    const std::vector<std::unique_ptr<Exp>>& getDimensionSizes() const;
 
-    size_t getInitialCount() const;
+    size_t getInitialsCount() const;
     Exp* getInitial(size_t index) const;
     void addInitial(std::unique_ptr<Exp> init);
     const std::vector<std::unique_ptr<Exp>>& getInitials() const;
 };
 
-class VariableDefStmt : public Stmt {
+class VariableDecl : public Stmt {
 private:
-    bool staticFlag;
-    bool constFlag;
-    BasicType varType;
-    std::vector<std::unique_ptr<VariableDef>> defs;
+    StorageClass storageClass;
+    TypeQualifier typeQualifier;
+    BasicType DeclType;
+    std::vector<std::unique_ptr<VariableDeclarator>> declarators;
 public:
-    VariableDefStmt(int line, std::vector<std::unique_ptr<VariableDef>> defs = {});
+    VariableDecl(int sl);
 
-    bool isStatic() const;
-    bool isConst() const;
-    void setStaticFlag(bool flag);
-    void setConstFlag(bool flag);
+    StorageClass getStorageClass() const;
+    void setStorageClass(StorageClass storageClass);
 
-    BasicType getVarType() const;
-    void setVarType(BasicType type);
+    TypeQualifier getTypeQualifier() const;
+    void setTypeQualifier(TypeQualifier typeQualifier);
 
-    size_t getDefsCount() const;
-    VariableDef* getDef(size_t index) const;
-    void addDef(std::unique_ptr<VariableDef> decl);
-    const std::vector<std::unique_ptr<VariableDef>>& getDefs() const;
+    BasicType getDeclType() const;
+    void setDeclType(BasicType type);
+
+    size_t getDeclaratorsCount() const;
+    VariableDeclarator* getDeclarator(size_t index) const;
+
+    const std::vector<std::unique_ptr<VariableDeclarator>>& getDeclarators() const;
+
+    void addDeclarator(std::unique_ptr<VariableDeclarator> decl);
 };
 
-class Param : public AstNode {
+class FormatParam : public AstNode {
     std::string identifier;
     BasicType paramType;
-    bool arrayFlag;
+    int dimension;
+    std::vector<std::unique_ptr<Exp>> dimensionSizes;
 public:
-    Param(const std::string& id, BasicType type, bool arrayFlag = false);
+    FormatParam();
 
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
@@ -197,48 +204,49 @@ public:
     BasicType getParamType() const;
     void setParamType(BasicType type);
 
-    bool isArray() const;
-    void setIsArray(bool arrayFlag);
+    int getDimension() const;
+    void setDimension(int dim);
+    void increaseDimension();
+
+    size_t getDimensionSizesCount() const;
+    Exp* getDimensionSize(size_t index) const;
+    void addDimensionSize(std::unique_ptr<Exp> dimSize);
+    const std::vector<std::unique_ptr<Exp>>& getDimensionSizes() const;
 };
 
-class FunctionDefStmt : public Stmt {
+class FunctionDecl : public Stmt {
     std::string identifier;
     BasicType funcType;
-    std::vector<std::unique_ptr<Param>> formatParams;
-    std::unique_ptr<Stmt> stmt;
+    std::vector<std::unique_ptr<FormatParam>> formatParams;
+    std::unique_ptr<Stmt> functionBody;
 public:
-     FunctionDefStmt(int line, BasicType funcType,
-                 std::vector<std::unique_ptr<Param>> params = {},
-                 std::unique_ptr<Stmt> statement = nullptr);
+    FunctionDecl(int sl);
 
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
 
     BasicType getFuncType() const;
-    void setFuncType(BasicType type);
- 
-    size_t getFormatParamsCount() const;
-    Param* getFormatParam(size_t index) const;
-    void addFormatParam(std::unique_ptr<Param> param);
-    const std::vector<std::unique_ptr<Param>>& getFormatParams() const;
-    void setFormatParams(std::vector<std::unique_ptr<Param>> params);
- 
-    bool hasStmt() const;
-    Stmt* getStmt() const;
-    std::unique_ptr<Stmt> releaseStmt();
-    void setStmt(std::unique_ptr<Stmt> statement);
+    void setFuncType(BasicType fType);
 
+    size_t getFormatParamsCount() const;
+    FormatParam* getFormatParam(size_t index) const;
+    void addFormatParam(std::unique_ptr<FormatParam> param);
+    const std::vector<std::unique_ptr<FormatParam>>& getFormatParams() const;
+
+    Stmt* getFunctionBody() const;
+    std::unique_ptr<Stmt> releaseFunctionBody();
+    void setFunctionBody(std::unique_ptr<Stmt> s);
 };
 
 class ExpStmt : public Stmt {
 private:
     std::unique_ptr<Exp> exp;
 public:
-    ExpStmt(int line, std::unique_ptr<Exp> exp);
+    ExpStmt(int sl);
 
     Exp* getExp() const;
     std::unique_ptr<Exp> releaseExp();
-    void setExp(std::unique_ptr<Exp> exp);
+    void setExp(std::unique_ptr<Exp> e);
 };
 
 class ForStmt : public Stmt {
@@ -248,12 +256,11 @@ private:
     std::unique_ptr<Exp> iteration;
     std::unique_ptr<Stmt> stmt;
 public:
-    ForStmt(int line, std::unique_ptr<Stmt> init = nullptr, std::unique_ptr<Exp> cond = nullptr,
-            std::unique_ptr<Exp> iter = nullptr, std::unique_ptr<Stmt> statement = nullptr);
+    ForStmt(int sl);
 
     Stmt* getInitial() const;
     std::unique_ptr<Stmt> releaseInitial();
-    void setInitial(std::unique_ptr<Stmt> init);
+    void setInitial(std::unique_ptr<Stmt> s);
 
     Exp* getCondition() const;
     std::unique_ptr<Exp> releaseCondition();
@@ -263,9 +270,9 @@ public:
     std::unique_ptr<Exp> releaseIteration();
     void setIteration(std::unique_ptr<Exp> iter);
 
-    Stmt* getStmt() const;
-    std::unique_ptr<Stmt> releaseStmt();
-    void setStmt(std::unique_ptr<Stmt> statement);
+    Stmt* getBody() const;
+    std::unique_ptr<Stmt> releaseBody();
+    void setBody(std::unique_ptr<Stmt> s);
 };
 
 class IfStmt : public Stmt {
@@ -274,9 +281,7 @@ private:
     std::unique_ptr<Stmt> trueStmt;
     std::unique_ptr<Stmt> falseStmt;
 public:
-    IfStmt(int line, std::unique_ptr<Exp> cond = nullptr,
-           std::unique_ptr<Stmt> trueStatement = nullptr,
-           std::unique_ptr<Stmt> falseStatement = nullptr);
+    IfStmt(int sl);
 
     Exp* getCondition() const;
     std::unique_ptr<Exp> releaseCondition();
@@ -291,20 +296,25 @@ public:
     void setFalseStmt(std::unique_ptr<Stmt> falseStatement);
 };
 
-class JumpStmt : public Stmt {
+class BreakStmt : public Stmt {
 public:
-    enum class JumpStmtType { RETURN, BREAK, CONTINUE };
+    BreakStmt(int sl);
+};
+
+class ContinueStmt : public Stmt {
+public:
+    ContinueStmt(int sl);
+};
+
+class ReturnStmt : public Stmt {
 private:
-    JumpStmtType jumpStmtType;
     std::unique_ptr<Exp> returnExp;
 public:
-    JumpStmt(int line, JumpStmtType jumpStmtType, std::unique_ptr<Exp> retExp = nullptr);
-    JumpStmtType getJumpStmtType() const;
-    void setJumpStmtType(JumpStmtType jumpStmtType);
+    ReturnStmt(int sl);
 
     Exp* getReturnExp() const;
     std::unique_ptr<Exp> releaseReturnExp();
-    void setReturnExp(std::unique_ptr<Exp> retExp);
+    void setReturnExp(std::unique_ptr<Exp> reType);
 };
 
 class BlockStmt : public Stmt {
@@ -312,39 +322,38 @@ private:
     int endline;
     std::vector<std::unique_ptr<Stmt>> stmts;
 public:
-    BlockStmt(int line, std::vector<std::unique_ptr<Stmt>> statements = {});
+    BlockStmt(int sl);
 
     int getEndLine() const;
-    void setEndLine(int l);
+    void setEndLine(int el);
 
     size_t getStmtsCount() const;
     Stmt* getStmt(size_t index) const;
-    void addStmt(std::unique_ptr<Stmt> stmt);
+    void addStmt(std::unique_ptr<Stmt> s);
     const std::vector<std::unique_ptr<Stmt>>& getStmts() const;
 };
 
 class CompUnit : public AstNode {
 private:
-    std::vector<std::unique_ptr<VariableDefStmt>> globalVarDefStmts;
-    std::vector<std::unique_ptr<FunctionDefStmt>> funcDefStmts;
-    std::unique_ptr<FunctionDefStmt> mainFuncDef;
+    std::vector<std::unique_ptr<VariableDecl>> globalVarDecl;
+    std::vector<std::unique_ptr<FunctionDecl>> funcDecl;
+    std::unique_ptr<FunctionDecl> mainFuncDecl;
 public:
-
     CompUnit();
 
-    void addGlobalVarDefStmt(std::unique_ptr<VariableDefStmt> varDefStmt);
-    void addFuncDefStmt(std::unique_ptr<FunctionDefStmt> funcDefStmt);
-    void setMainFuncDef(std::unique_ptr<FunctionDefStmt> mainFunc);
+    size_t getGlobalVarDeclCount() const;
+    VariableDecl* getGlobalVarDecl(size_t index) const;
+    void addGlobalVarDecl(std::unique_ptr<VariableDecl> decl);
+    const std::vector<std::unique_ptr<VariableDecl>>& getGlobalVarDecls() const;
 
-    size_t getGlobalVarDefStmtsCount() const;
-    VariableDefStmt* getGlobalVarDefStmt(size_t index) const;
-    const std::vector<std::unique_ptr<VariableDefStmt>>& getGlobalVarDefStmts() const;
+    size_t getFuncDeclCount() const;
+    FunctionDecl* getFuncDecl(size_t index) const;
+    void addFuncDecl(std::unique_ptr<FunctionDecl> decl);
+    const std::vector<std::unique_ptr<FunctionDecl>>& getFuncDecls() const;
 
-    size_t getFuncDefStmtsCount() const;
-    FunctionDefStmt* getFuncDefStmt(size_t index) const;
-    const std::vector<std::unique_ptr<FunctionDefStmt>>& getFuncDefStmts() const;
-
-    FunctionDefStmt* getMainFuncDef() const;
+    FunctionDecl* getMainFuncDecl() const;
+    std::unique_ptr<FunctionDecl> releaseMainFuncDecl();
+    void setMainFuncDecl(std::unique_ptr<FunctionDecl> decl);
 };
 
 #endif
