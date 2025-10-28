@@ -12,7 +12,7 @@ int main() {
         return 1;
     }
     LexicalAnalysis lexicalAnalysis = LexicalAnalysis(file);
-    Parse parse = Parse(lexicalAnalysis);
+    Parser parse = Parser(lexicalAnalysis);
     auto root = parse.parse();
     parse.parserLog(root.get());
     //Visitor visitor;

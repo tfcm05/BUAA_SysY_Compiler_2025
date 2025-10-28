@@ -1,5 +1,5 @@
 #include"../front/AstNode.h"
-
+/*
 class Visitor {
     private:
         // 针对前端 AST 的访问接口
@@ -14,4 +14,4 @@ class Visitor {
 
     public:
         void visitCompUnit(const AstNode& node);
-};
+};*/
