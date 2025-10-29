@@ -105,7 +105,7 @@ public:
 
 class BinaryExp : public Exp {
 public:
-    enum class BinaryOp { PLUS, MINU, MULT, DIV, MOD, ASSIGN, OR, AND, EQL, NEQ, GRE, GEQ, LSS, LEQ, COMMA, UNKNOWN };
+    enum class BinaryOp { PLUS, MINU, MULT, DIV, MOD, OR, AND, EQL, NEQ, GRE, GEQ, LSS, LEQ, COMMA, UNKNOWN };
 private:
     std::unique_ptr<Exp> lhs;
     BinaryOp binaryOp;
@@ -125,6 +125,27 @@ public:
     void setBinaryOp(BinaryOp bop);
 };
 
+class AssignExp : public Exp {
+public:
+    enum class AssignType { EQ, ADD_EQ, SUB_EQ, MUL_EQ, DIV_EQ, MOD_EQ };
+private:
+    std::unique_ptr<Exp> lhs;
+    AssignType assignType;
+    std::unique_ptr<Exp> rhs;
+public:
+    AssignExp(std::unique_ptr<Exp> l, AssignType op, std::unique_ptr<Exp> r);
+
+    Exp* getLhs() const;
+    Exp* getRhs() const;
+    AssignType getAssignType() const;
+
+    std::unique_ptr<Exp> releaseLhs();
+    std::unique_ptr<Exp> releaseRhs();
+
+    void setLhs(std::unique_ptr<Exp> l);
+    void setRhs(std::unique_ptr<Exp> r);
+};
+
 /* 
  * this is statement part
  */
@@ -135,107 +156,6 @@ public:
     Stmt(int sl);
     int getLine() const;
     void setLine(int sl);
-};
-
-class VariableDeclarator : public AstNode {
-private:
-    std::string identifier;
-    int dimension;
-    std::vector<std::unique_ptr<Exp>> dimensionSizes;
-    std::vector<std::unique_ptr<Exp>> initials;
-public:
-    VariableDeclarator();
-
-    const std::string& getIdentifier() const;
-    void setIdentifier(const std::string& id);
-
-    int getDimension() const;
-    void setDimension(int dim);
-    void increaseDimension();
-
-    size_t getDimensionSizesCount() const;
-    Exp* getDimensionSize(size_t index) const;
-    void addDimensionSize(std::unique_ptr<Exp> dimSize);
-    const std::vector<std::unique_ptr<Exp>>& getDimensionSizes() const;
-
-    size_t getInitialsCount() const;
-    Exp* getInitial(size_t index) const;
-    void addInitial(std::unique_ptr<Exp> init);
-    const std::vector<std::unique_ptr<Exp>>& getInitials() const;
-};
-
-class VariableDecl : public Stmt {
-private:
-    StorageClass storageClass;
-    TypeQualifier typeQualifier;
-    BasicType DeclType;
-    std::vector<std::unique_ptr<VariableDeclarator>> declarators;
-public:
-    VariableDecl(int sl);
-
-    StorageClass getStorageClass() const;
-    void setStorageClass(StorageClass storageClass);
-
-    TypeQualifier getTypeQualifier() const;
-    void setTypeQualifier(TypeQualifier typeQualifier);
-
-    BasicType getDeclType() const;
-    void setDeclType(BasicType type);
-
-    size_t getDeclaratorsCount() const;
-    VariableDeclarator* getDeclarator(size_t index) const;
-
-    const std::vector<std::unique_ptr<VariableDeclarator>>& getDeclarators() const;
-
-    void addDeclarator(std::unique_ptr<VariableDeclarator> decl);
-};
-
-class FormatParam : public AstNode {
-    std::string identifier;
-    BasicType paramType;
-    int dimension;
-    std::vector<std::unique_ptr<Exp>> dimensionSizes;
-public:
-    FormatParam();
-
-    const std::string& getIdentifier() const;
-    void setIdentifier(const std::string& id);
-
-    BasicType getParamType() const;
-    void setParamType(BasicType type);
-
-    int getDimension() const;
-    void setDimension(int dim);
-    void increaseDimension();
-
-    size_t getDimensionSizesCount() const;
-    Exp* getDimensionSize(size_t index) const;
-    void addDimensionSize(std::unique_ptr<Exp> dimSize);
-    const std::vector<std::unique_ptr<Exp>>& getDimensionSizes() const;
-};
-
-class FunctionDecl : public Stmt {
-    std::string identifier;
-    BasicType funcType;
-    std::vector<std::unique_ptr<FormatParam>> formatParams;
-    std::unique_ptr<Stmt> functionBody;
-public:
-    FunctionDecl(int sl);
-
-    const std::string& getIdentifier() const;
-    void setIdentifier(const std::string& id);
-
-    BasicType getFuncType() const;
-    void setFuncType(BasicType fType);
-
-    size_t getFormatParamsCount() const;
-    FormatParam* getFormatParam(size_t index) const;
-    void addFormatParam(std::unique_ptr<FormatParam> param);
-    const std::vector<std::unique_ptr<FormatParam>>& getFormatParams() const;
-
-    Stmt* getFunctionBody() const;
-    std::unique_ptr<Stmt> releaseFunctionBody();
-    void setFunctionBody(std::unique_ptr<Stmt> s);
 };
 
 class ExpStmt : public Stmt {
@@ -251,16 +171,16 @@ public:
 
 class ForStmt : public Stmt {
 private:
-    std::unique_ptr<Stmt> initial;
+    std::unique_ptr<Exp> initial;
     std::unique_ptr<Exp> condition;
     std::unique_ptr<Exp> iteration;
     std::unique_ptr<Stmt> stmt;
 public:
     ForStmt(int sl);
 
-    Stmt* getInitial() const;
-    std::unique_ptr<Stmt> releaseInitial();
-    void setInitial(std::unique_ptr<Stmt> s);
+    Exp* getInitial() const;
+    std::unique_ptr<Exp> releaseInitial();
+    void setInitial(std::unique_ptr<Exp> s);
 
     Exp* getCondition() const;
     std::unique_ptr<Exp> releaseCondition();
@@ -331,6 +251,97 @@ public:
     Stmt* getStmt(size_t index) const;
     void addStmt(std::unique_ptr<Stmt> s);
     const std::vector<std::unique_ptr<Stmt>>& getStmts() const;
+};
+
+class VariableDeclarator : public AstNode {
+private:
+    std::string identifier;
+    std::vector<std::unique_ptr<Exp>> dimensionSizes;
+    std::vector<std::unique_ptr<Exp>> initials;
+public:
+    VariableDeclarator();
+
+    const std::string& getIdentifier() const;
+    void setIdentifier(const std::string& id);
+
+    size_t getDimensionSizesCount() const;
+    Exp* getDimensionSize(size_t index) const;
+    void addDimensionSize(std::unique_ptr<Exp> dimSize);
+    const std::vector<std::unique_ptr<Exp>>& getDimensionSizes() const;
+
+    size_t getInitialsCount() const;
+    Exp* getInitial(size_t index) const;
+    void addInitial(std::unique_ptr<Exp> init);
+    const std::vector<std::unique_ptr<Exp>>& getInitials() const;
+};
+
+class VariableDecl : public Stmt {
+private:
+    StorageClass storageClass;
+    TypeQualifier typeQualifier;
+    BasicType DeclType;
+    std::vector<std::unique_ptr<VariableDeclarator>> declarators;
+public:
+    VariableDecl(int sl);
+
+    StorageClass getStorageClass() const;
+    void setStorageClass(StorageClass storageClass);
+
+    TypeQualifier getTypeQualifier() const;
+    void setTypeQualifier(TypeQualifier typeQualifier);
+
+    BasicType getDeclType() const;
+    void setDeclType(BasicType type);
+
+    size_t getDeclaratorsCount() const;
+    VariableDeclarator* getDeclarator(size_t index) const;
+
+    const std::vector<std::unique_ptr<VariableDeclarator>>& getDeclarators() const;
+
+    void addDeclarator(std::unique_ptr<VariableDeclarator> decl);
+};
+
+class FormatParam : public AstNode {
+    std::string identifier;
+    BasicType paramType;
+    std::vector<std::unique_ptr<Exp>> dimensionSizes;
+public:
+    FormatParam();
+
+    const std::string& getIdentifier() const;
+    void setIdentifier(const std::string& id);
+
+    BasicType getParamType() const;
+    void setParamType(BasicType type);
+
+    size_t getDimensionSizesCount() const;
+    Exp* getDimensionSize(size_t index) const;
+    void addDimensionSize(std::unique_ptr<Exp> dimSize);
+    const std::vector<std::unique_ptr<Exp>>& getDimensionSizes() const;
+};
+
+class FunctionDecl : public Stmt {
+    std::string identifier;
+    BasicType funcType;
+    std::vector<std::unique_ptr<FormatParam>> formatParams;
+    std::unique_ptr<BlockStmt> functionBody;
+public:
+    FunctionDecl(int sl);
+
+    const std::string& getIdentifier() const;
+    void setIdentifier(const std::string& id);
+
+    BasicType getFuncType() const;
+    void setFuncType(BasicType fType);
+
+    size_t getFormatParamsCount() const;
+    FormatParam* getFormatParam(size_t index) const;
+    void addFormatParam(std::unique_ptr<FormatParam> param);
+    const std::vector<std::unique_ptr<FormatParam>>& getFormatParams() const;
+
+    BlockStmt* getFunctionBody() const;
+    std::unique_ptr<BlockStmt> releaseFunctionBody();
+    void setFunctionBody(std::unique_ptr<BlockStmt> b);
 };
 
 class CompUnit : public AstNode {

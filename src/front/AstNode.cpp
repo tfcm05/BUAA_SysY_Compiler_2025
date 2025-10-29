@@ -152,6 +152,37 @@ void BinaryExp::setBinaryOp(BinaryOp bop) {
     binaryOp = bop;
 }
 
+AssignExp::AssignExp(std::unique_ptr<Exp> l, AssignType op, std::unique_ptr<Exp> r)
+    : lhs(std::move(l)), assignType(op), rhs(std::move(r)) {}
+
+Exp* AssignExp::getLhs() const {
+    return lhs.get();
+}
+
+Exp* AssignExp::getRhs() const {
+    return rhs.get();
+}
+
+AssignExp::AssignType AssignExp::getAssignType() const {
+    return assignType;  
+}
+
+std::unique_ptr<Exp> AssignExp::releaseLhs() {
+    return std::move(lhs);
+}
+
+std::unique_ptr<Exp> AssignExp::releaseRhs() {
+    return std::move(rhs);
+}
+
+void AssignExp::setLhs(std::unique_ptr<Exp> l) {
+    lhs = std::move(l);
+}
+
+void AssignExp::setRhs(std::unique_ptr<Exp> r) {
+    rhs = std::move(r);
+}
+
 /*
  * Stmt and derived classes
  */
@@ -163,25 +194,12 @@ int Stmt::getLine() const { return startLine; }
 
 void Stmt::setLine(int sl) { startLine = sl; }
 
-VariableDeclarator::VariableDeclarator()
-    : dimension(0) {}
+VariableDeclarator::VariableDeclarator() {}
 
 const std::string& VariableDeclarator::getIdentifier() const { return identifier; }
 
 void VariableDeclarator::setIdentifier(const std::string& id) {
     identifier = id;
-}
-
-int VariableDeclarator::getDimension() const {
-    return dimension;
-}
-
-void VariableDeclarator::setDimension(int dim) {
-    dimension = dim;
-}
-
-void VariableDeclarator::increaseDimension() {
-    dimension++;
 }
 
 // VariableDeclarator
@@ -228,8 +246,7 @@ void VariableDecl::addDeclarator(std::unique_ptr<VariableDeclarator> decl) { dec
 const std::vector<std::unique_ptr<VariableDeclarator>>& VariableDecl::getDeclarators() const { return declarators; }
 
 // FormatParam
-FormatParam::FormatParam()
-    : dimension(0) {}
+FormatParam::FormatParam() {}
 
 const std::string& FormatParam::getIdentifier() const { return identifier; }
 
@@ -243,18 +260,6 @@ BasicType FormatParam::getParamType() const {
 
 void FormatParam::setParamType(BasicType type) {
     paramType = type;
-}
-
-int FormatParam::getDimension() const {
-    return dimension;
-}
-
-void FormatParam::setDimension(int dim) {
-    dimension = dim;
-}
-
-void FormatParam::increaseDimension() {
-    dimension++;
 }
 
 // FormatParam
@@ -287,16 +292,16 @@ FormatParam* FunctionDecl::getFormatParam(size_t index) const { return formatPar
 void FunctionDecl::addFormatParam(std::unique_ptr<FormatParam> param) { formatParams.push_back(std::move(param)); }
 const std::vector<std::unique_ptr<FormatParam>>& FunctionDecl::getFormatParams() const { return formatParams; }
 
-Stmt* FunctionDecl::getFunctionBody() const {
+BlockStmt* FunctionDecl::getFunctionBody() const {
     return functionBody.get();
 }
 
-std::unique_ptr<Stmt> FunctionDecl::releaseFunctionBody() {
+std::unique_ptr<BlockStmt> FunctionDecl::releaseFunctionBody() {
     return std::move(functionBody);
 }
 
-void FunctionDecl::setFunctionBody(std::unique_ptr<Stmt> s) {
-    functionBody = std::move(s);
+void FunctionDecl::setFunctionBody(std::unique_ptr<BlockStmt> b) {
+    functionBody = std::move(b);
 }
 
 ExpStmt::ExpStmt(int sl)
@@ -317,15 +322,15 @@ void ExpStmt::setExp(std::unique_ptr<Exp> e) {
 ForStmt::ForStmt(int sl)
     : Stmt(sl), initial(nullptr), condition(nullptr), iteration(nullptr), stmt(nullptr) {}
 
-Stmt* ForStmt::getInitial() const {
+Exp* ForStmt::getInitial() const {
     return initial.get();
 }
 
-std::unique_ptr<Stmt> ForStmt::releaseInitial() {
+std::unique_ptr<Exp> ForStmt::releaseInitial() {
     return std::move(initial);
 }
 
-void ForStmt::setInitial(std::unique_ptr<Stmt> s) {
+void ForStmt::setInitial(std::unique_ptr<Exp> s) {
     initial = std::move(s);
 }
 
