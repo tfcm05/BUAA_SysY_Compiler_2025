@@ -1,39 +1,40 @@
 #ifndef SYMBOL_H
 #define SYMBOL_H
 
-#include"Value.h"
-#include<string>
-#include<vector>
-
-enum class DataType {
-    DATA_VOID,
-    DATA_INT,
-    DATA_ARRAY,
-};
+#include <string>
+#include <memory>
+#include "Type.h"
+#include "Value.h"
 
 class Symbol {
-    protected:
-        std::string name;
-        DataType dataType; // 类型
+public:
+    enum SymbolKind {
+        VARIABLE,
+        FUNCTION,
+    };
 
-        // llvm
-        ValuePtr value;
-    public:
-        // 初始化
-        Symbol(const std::string& name, const DataType& dataType);
+private:
+    std::string name;
+    StorageClass storageClass;
+    TypePtr type;
+    SymbolKind kind;
+    ValuePtr value; // For IR generation
+
+    bool isGlobal;
+public:
+    Symbol(std::string name, StorageClass storageClass, TypePtr type, SymbolKind kind, bool isGlobal)
+        : name(name), storageClass(storageClass), type(type), kind(kind), value(nullptr), isGlobal(isGlobal) {}
+
+    const std::string& getName() const { return name; }
+    TypePtr getType() const { return type; }
+    StorageClass getStorageClass() const { return storageClass; }
+    SymbolKind getKind() const { return kind; }
+    ValuePtr getValue() const { return value; }
+    void setValue(ValuePtr v) { value = v; }
+    bool getIsGlobal() const { return isGlobal; }
+    void setIsGlobal(bool g) { isGlobal = g; }
 };
 
-class VarSymbol : public Symbol {
-    private:
-        bool isStatic;
-        bool isConst;
-    public:
-        VarSymbol(const std::string& name, const DataType& dataType, bool isStatic, bool isConst);
-};
-
-class FuncSymbol : public Symbol {
-    private:
-        std::vector<make_shared<VarSymbol>> parameters;
-};
+using SymbolPtr = std::shared_ptr<Symbol>;
 
 #endif

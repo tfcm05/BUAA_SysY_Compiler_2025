@@ -130,13 +130,18 @@ std::unique_ptr<VariableDeclarator> Parser::parseVarDeclarator() {
     node->setIdentifier(CURRENT_VALUE);
     expect(IDENFR);
 
-    while (match(LBRACK)) {
+    if (match(LBRACK)) {
         expect(LBRACK);
-        node->increaseDimension();
-        if (!match(RBRACK)) {
-            node->addDimensionSize(parseCommaExp());
-        }
+        node->addDimensionSize(parseCommaExp());
         expect(RBRACK);
+        while (match(LBRACK)) {
+            expect(LBRACK);
+            if (match(RBRACK)) {
+                std::cout << "Error: Expected dimension size after '['" << std::endl;
+            }
+            node->addDimensionSize(parseCommaExp());
+            expect(RBRACK);
+        }
     }
 
     if (match(ASSIGN)) {
@@ -227,13 +232,19 @@ std::unique_ptr<FormatParam> Parser::parseFuncFParam() {
 
     node->setIdentifier(CURRENT_VALUE);
     expect(IDENFR);
-    while (match(LBRACK)) {
+    if (match(LBRACK)) {
         expect(LBRACK);
-        node->increaseDimension();
-        if (!match(RBRACK)) {
-            node->addDimensionSize(parseCommaExp());
-        }
+        node->addDimensionSize(nullptr);
+        parseCommaExp();
         expect(RBRACK);
+        while (match(LBRACK)) {
+            expect(LBRACK);
+            if (match(RBRACK)) {
+                std::cout << "Error: Expected dimension size after '['" << std::endl;
+            }
+            node->addDimensionSize(parseCommaExp());
+            expect(RBRACK);
+        }
     }
 
     return node;
@@ -298,7 +309,10 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
 
     expect(FORTK);
     expect(LPARENT);
-    node->setInitial(parseStmt());
+    if (!match(SEMICN)) {
+        node->setInitial(parseCommaExp());
+    }
+    expect(SEMICN);
     if (!match(SEMICN)) {
         node->setCondition(parseCommaExp());
     } 
@@ -388,8 +402,7 @@ std::unique_ptr<Exp> Parser::parseAssignExp() {
     if (match(ASSIGN)) {
         expect(ASSIGN);
         auto right = parseAssignExp();
-        auto node = std::make_unique<BinaryExp>(std::move(left), BinaryExp::BinaryOp::ASSIGN, std::move(right));
-        return node;
+        return std::make_unique<AssignExp>(std::move(left), AssignExp::AssignType::EQ, std::move(right));
     }
 
     return left;
@@ -515,11 +528,21 @@ std::unique_ptr<Exp> Parser::parsePostfixExp() {
     while (match(LBRACK) || match(LPARENT)) {
         if (match(LBRACK)) {
             expect(LBRACK);
+            if (match(RBRACK)) {
+                expect(RBRACK);
+                std::cout << "Error: Expected expression inside '[]'" << std::endl;
+                continue;
+            }
             auto postfix = parseCommaExp();
             expect(RBRACK);
             node = std::make_unique<SubscriptExp>(std::move(node), std::move(postfix));
         } else {
             expect(LPARENT);
+            if (match(RPARENT)) {
+                expect(RPARENT);
+                node = std::make_unique<FunctionCallExp>(std::move(node), std::vector<std::unique_ptr<Exp>>{});
+                continue;
+            }
             auto postfix = parseFuncRParams();
             expect(RPARENT);
             node = std::make_unique<FunctionCallExp>(std::move(node), std::move(postfix));
@@ -591,7 +614,6 @@ void Parser::parserLog(const AstNode* root) const {
                 case BinaryExp::BinaryOp::MULT:   return "*";
                 case BinaryExp::BinaryOp::DIV:    return "/";
                 case BinaryExp::BinaryOp::MOD:    return "%";
-                case BinaryExp::BinaryOp::ASSIGN: return "=";
                 case BinaryExp::BinaryOp::OR:     return "||";
                 case BinaryExp::BinaryOp::AND:    return "&&";
                 case BinaryExp::BinaryOp::EQL:    return "==";
@@ -605,11 +627,20 @@ void Parser::parserLog(const AstNode* root) const {
             }
         }
 
-        void printNode(const AstNode* node, int lvl) {
-            if (!node) {
-                ofs << indentFn(lvl) << "null\n";
-                return;
+        const char* assignOpName(AssignExp::AssignType op) const {
+            switch (op) {
+                case AssignExp::AssignType::EQ:     return "=";
+                case AssignExp::AssignType::ADD_EQ: return "+=";
+                case AssignExp::AssignType::SUB_EQ: return "-=";
+                case AssignExp::AssignType::MUL_EQ: return "*=";
+                case AssignExp::AssignType::DIV_EQ: return "/=";
+                case AssignExp::AssignType::MOD_EQ: return "%=";
+                default:                            return "?=";
             }
+        }
+
+        void printNode(const AstNode* node, int lvl) {
+            if (!node) return;
 
             // ===== Expressions =====
             if (auto n = dynamic_cast<const LiteralExp*>(node)) {
@@ -653,6 +684,14 @@ void Parser::parserLog(const AstNode* root) const {
                 printNode(u->getExp(), lvl+1);
                 return;
             }
+            if (auto a = dynamic_cast<const AssignExp*>(node)) {
+                ofs << indentFn(lvl) << "AssignExp: " << assignOpName(a->getAssignType()) << "\n";
+                ofs << indentFn(lvl+1) << "LHS:\n";
+                printNode(a->getLhs(), lvl+2);
+                ofs << indentFn(lvl+1) << "RHS:\n";
+                printNode(a->getRhs(), lvl+2);
+                return;
+            }
             if (auto b = dynamic_cast<const BinaryExp*>(node)) {
                 ofs << indentFn(lvl) << "BinaryExp: " << binOpName(b->getBinaryOp()) << "\n";
                 ofs << indentFn(lvl+1) << "LHS:\n";
@@ -689,7 +728,7 @@ void Parser::parserLog(const AstNode* root) const {
             }
             if (auto vd = dynamic_cast<const VariableDeclarator*>(node)) {
                 ofs << indentFn(lvl) << "VariableDeclarator: " << vd->getIdentifier() << "\n";
-                ofs << indentFn(lvl+1) << "Dimensions: " << vd->getDimension() << "\n";
+                ofs << indentFn(lvl+1) << "Dimensions: " << vd->getDimensionSizesCount() << "\n";
                 if ((vd->getDimensionSizesCount()) > 0) {
                     ofs << indentFn(lvl+1) << "DimSizes:\n";
                     for (size_t i = 0; i < vd->getDimensionSizesCount(); ++i) {
@@ -716,7 +755,7 @@ void Parser::parserLog(const AstNode* root) const {
             if (auto p = dynamic_cast<const FormatParam*>(node)) {
                 ofs << indentFn(lvl) << "FormatParam: " << p->getIdentifier()
                     << " type=" << basicTypeName(p->getParamType())
-                    << " dims=" << p->getDimension() << "\n";
+                    << " dims=" << p->getDimensionSizesCount() << "\n";
                 if (p->getDimensionSizesCount() > 0) {
                     ofs << indentFn(lvl+1) << "DimSizes:\n";
                     for (size_t i = 0; i < p->getDimensionSizesCount(); ++i) {

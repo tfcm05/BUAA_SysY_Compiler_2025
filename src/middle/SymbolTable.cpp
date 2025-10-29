@@ -5,7 +5,7 @@
 std::shared_ptr<SymbolTable> curScope;
 
 // 静态成员初始化
-int SymbolTable::nextId = 0;
+int SymbolTable::nextId = 1;
 
 SymbolTable::SymbolTable() : id(nextId++) { }
 
@@ -19,19 +19,18 @@ std::shared_ptr<SymbolTable> SymbolTable::popScope() {
     return father; 
 }
 
-bool SymbolTable::existInScope(const std::string &name) {
+void SymbolTable::addSymbol(const std::string& name, std::shared_ptr<Symbol> symbolPtr) {
+    symbols[name] = symbolPtr;
+}
+
+bool SymbolTable::existInCurScope(const std::string &name) {
     return symbols.find(name) != symbols.end();
 }
 
-bool SymbolTable::addSymbol(const std::string& name, std::shared_ptr<Symbol> symbolPtr) {
-    if (!existInScope(name)) {
-        symbols[name] = symbolPtr;
-        return true;
-    } else {
-        // 简单错误输出，后续可替换为工程统一的 errorLog 接口
-        std::cerr << "Error: symbol '" << name << "' is already defined in current scope.\n";
-        return false;
-    }
+bool SymbolTable::existInCurAndPreScope(const std::string &name) {
+    if (existInCurScope(name)) return true;
+    if (father) return father->existInCurAndPreScope(name);
+    return false;
 }
 
 std::shared_ptr<Symbol> SymbolTable::lookup(const std::string &name) {
@@ -43,4 +42,8 @@ std::shared_ptr<Symbol> SymbolTable::lookup(const std::string &name) {
         t = t->father;
     }
     return nullptr;
+}
+
+int SymbolTable::getScopeId() const {
+    return id;
 }
