@@ -20,10 +20,9 @@ private:
     SymbolKind kind;
     ValuePtr value; // For IR generation
 
-    bool isGlobal;
 public:
-    Symbol(std::string name, StorageClass storageClass, TypePtr type, SymbolKind kind, bool isGlobal)
-        : name(name), storageClass(storageClass), type(type), kind(kind), value(nullptr), isGlobal(isGlobal) {}
+    Symbol(std::string name, StorageClass storageClass, TypePtr type, SymbolKind kind)
+        : name(name), storageClass(storageClass), type(type), kind(kind), value(nullptr) {}
 
     const std::string& getName() const { return name; }
     TypePtr getType() const { return type; }
@@ -31,8 +30,6 @@ public:
     SymbolKind getKind() const { return kind; }
     ValuePtr getValue() const { return value; }
     void setValue(ValuePtr v) { value = v; }
-    bool getIsGlobal() const { return isGlobal; }
-    void setIsGlobal(bool g) { isGlobal = g; }
 };
 
 using SymbolPtr = std::shared_ptr<Symbol>;

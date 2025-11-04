@@ -6,13 +6,19 @@
 #include "../front/AstNode.h"
 
 class Type;
+class IntegerType;
+class CharType;
+class VoidType;
+class ArrayType;
+class FunctionType;
 using TypePtr = std::shared_ptr<Type>;
 
-class Type {
+class Type : public std::enable_shared_from_this<Type> {
 public:
     enum TypeID {
         VoidTyID,
         IntegerTyID,
+        CharTyID,
         FunctionTyID,
         ArrayTyID,
     };
@@ -23,24 +29,27 @@ public:
     Type(TypeID id, TypeQualifier tq = TypeQualifier::NONE) : typeIdentifier(id), typeQualifier(tq) {}
     virtual ~Type() = default;
     TypeID getTypeID() const { return typeIdentifier; }
-    TypeQualifier getTypeQualifier() const { return typeQualifier; }
-
-    void setTypeQualifier(TypeQualifier tq) { typeQualifier = tq; }
 
     bool isVoidTy() const { return typeIdentifier == VoidTyID; }
     bool isIntegerTy() const { return typeIdentifier == IntegerTyID; }
+    bool isCharTy() const { return typeIdentifier == CharTyID; }
     bool isFunctionTy() const { return typeIdentifier == FunctionTyID; }
     bool isArrayTy() const { return typeIdentifier == ArrayTyID; }
 
+    TypeQualifier getTypeQualifier() const { return typeQualifier; }
+
     bool isConst() const { return typeQualifier == TypeQualifier::CONST; }
+
+    void setTypeQualifier(TypeQualifier tq) { typeQualifier = tq; }
+
+    bool isCompatibleWith(TypePtr other);
 
     static TypePtr getVoidTy();
     static TypePtr getIntegerTy();
+    static TypePtr getCharTy();
 
-    bool isCompatibleWith(TypePtr other) {
-        if (this->isIntegerTy() && other->isIntegerTy()) return true;
-        return false;
-    }
+    static TypePtr getConstIntegerTy();
+    static TypePtr getConstCharTy();
 };
 
 class IntegerType : public Type {
@@ -51,6 +60,11 @@ public:
 class VoidType : public Type {
 public:
     VoidType() : Type(Type::VoidTyID) {}
+};
+
+class CharType : public Type {
+public:
+    CharType() : Type(Type::CharTyID) {}
 };
 
 class ArrayType : public Type {
@@ -81,6 +95,17 @@ public:
     void setVariadic(bool v) { variadicFlag = v; }
 };
 
+inline bool Type::isCompatibleWith(TypePtr other) {
+    if (this->isIntegerTy() && other->isIntegerTy()) return true;
+    else if (this->isArrayTy() && other->isArrayTy()) {
+        auto thisArr = std::dynamic_pointer_cast<ArrayType>(shared_from_this());
+        auto otherArr = std::dynamic_pointer_cast<ArrayType>(other);
+        return (thisArr->getElementType())->isCompatibleWith((otherArr->getElementType()));
+    }
+    return false;
+}
+
 TypePtr convertToType(BasicType basicType);
+TypePtr convertToType(BasicType basicType, TypeQualifier tq);
 
 #endif

@@ -33,13 +33,11 @@ std::unique_ptr<CompUnit> Parser::parseCompUnit() {
 void Parser::initial() {
     preLine = 0;
     currentToken = lexicalAnalysis.getNextToken();
-    lexerLog(currentToken);
 }
 
 void Parser::advance() {
     preLine = currentToken.getLine();
     currentToken = lexicalAnalysis.getNextToken();
-    lexerLog(currentToken);
 }
 
 Token Parser::peekNext() {
@@ -74,6 +72,11 @@ bool Parser::match(TokenType expected) {
 void Parser::expect(TokenType expect) {
     if (!match(expect)) {
         // 错误处理
+        /*
+        std::cout << "Error: Expected token " << getTypeCode(expect)
+                  << " but found token " << getTypeCode(CURRENT_TYPE)
+                  << " at line " << CURRENT_LINE << std::endl;
+                  */
         if (expect == SEMICN) {
             errorLog(ErrorCode::i, preLine);
         } else if (expect == RPARENT) {
@@ -132,16 +135,9 @@ std::unique_ptr<VariableDeclarator> Parser::parseVarDeclarator() {
 
     if (match(LBRACK)) {
         expect(LBRACK);
-        node->addDimensionSize(parseCommaExp());
+        node->addDimensionSize(parseAddExp());
         expect(RBRACK);
-        while (match(LBRACK)) {
-            expect(LBRACK);
-            if (match(RBRACK)) {
-                std::cout << "Error: Expected dimension size after '['" << std::endl;
-            }
-            node->addDimensionSize(parseCommaExp());
-            expect(RBRACK);
-        }
+        // 支持多维数组
     }
 
     if (match(ASSIGN)) {
@@ -159,17 +155,20 @@ std::vector<std::unique_ptr<Exp>> Parser::parseInitVal() {
     std::vector<std::unique_ptr<Exp>> vals;
     if (match(LBRACE)) {
         expect(LBRACE);
-        if (!match(RBRACE)) {
-            vals.push_back(parseAssignExp());
-            while (match(COMMA)) {
-                expect(COMMA);
-                if (match(RBRACE)) break;
-                vals.push_back(parseAssignExp());
+        auto val = parseAddExp();
+        if (val) {
+            vals.push_back(std::move(val));
+        }
+        while (match(COMMA)) {
+            expect(COMMA);
+            auto val = parseAddExp();
+            if (val) {
+                vals.push_back(std::move(val));
             }
         }
         expect(RBRACE);
     } else {
-        vals.push_back(parseAssignExp());
+        vals.push_back(parseAddExp());
     }
     return vals;
 }
@@ -178,7 +177,7 @@ std::vector<std::unique_ptr<Exp>> Parser::parseInitVal() {
 std::unique_ptr<FunctionDecl> Parser::parseFuncDecl() {
     auto node = std::make_unique<FunctionDecl>(CURRENT_LINE);
 
-    node->setFuncType(parseBasicType());
+    node->setReturnType(parseBasicType());
 
     node->setIdentifier(CURRENT_VALUE);
     expect(IDENFR);
@@ -200,7 +199,7 @@ std::unique_ptr<FunctionDecl> Parser::parseFuncDecl() {
 std::unique_ptr<FunctionDecl> Parser::parseMainFuncDecl() {
     auto node = std::make_unique<FunctionDecl>(CURRENT_LINE);
 
-    node->setFuncType(BasicType::INT);
+    node->setReturnType(BasicType::INT);
     expect(INTTK);
 
     node->setIdentifier("main");
@@ -216,45 +215,53 @@ std::unique_ptr<FunctionDecl> Parser::parseMainFuncDecl() {
 
 std::vector<std::unique_ptr<FormatParam>> Parser::parseFuncFParams() {
     std::vector<std::unique_ptr<FormatParam>> params;
-    params.push_back(parseFuncFParam());
+    auto formatParam = parseFuncFParam();
+    if (formatParam) {
+        params.push_back(std::move(formatParam));
+    }
     while (match(COMMA)) {
         expect(COMMA);
-        params.push_back(parseFuncFParam());
+        auto formatParam = parseFuncFParam();
+        if (formatParam) {
+            params.push_back(std::move(formatParam));
+        }
     }
     
     return params;
 }
 
 std::unique_ptr<FormatParam> Parser::parseFuncFParam() {
-    auto node = std::make_unique<FormatParam>();
+    if (match(INTTK)) {
+        auto node = std::make_unique<FormatParam>();
 
-    node->setParamType(parseBasicType());
+        node->setParamType(parseBasicType());
 
-    node->setIdentifier(CURRENT_VALUE);
-    expect(IDENFR);
-    if (match(LBRACK)) {
-        expect(LBRACK);
-        node->addDimensionSize(nullptr);
-        parseCommaExp();
-        expect(RBRACK);
-        while (match(LBRACK)) {
+        node->setIdentifier(CURRENT_VALUE);
+        expect(IDENFR);
+
+        if (match(LBRACK)) {
             expect(LBRACK);
-            if (match(RBRACK)) {
-                std::cout << "Error: Expected dimension size after '['" << std::endl;
-            }
-            node->addDimensionSize(parseCommaExp());
+            node->addDimensionSize(nullptr);
             expect(RBRACK);
         }
-    }
 
-    return node;
+        return node;
+    } else {
+        return nullptr;
+    }
 }
 std::vector<std::unique_ptr<Exp>> Parser::parseFuncRParams() {
     std::vector<std::unique_ptr<Exp>> params;
-    params.push_back(parseAssignExp());
+    auto param = parseAddExp();
+    if (param) {
+        params.push_back(std::move(param));
+    }
     while (match(COMMA)) {
         expect(COMMA);
-        params.push_back(parseAssignExp());
+        auto param = parseAddExp();
+        if (param) {
+            params.push_back(std::move(param));
+        }
     }
     return params;
 }
@@ -276,15 +283,13 @@ std::unique_ptr<BlockStmt> Parser::parseBlock() {
 }
 
 std::unique_ptr<ExpStmt> Parser::parseExpStmt() {
-
     if (!match(SEMICN)) {
         auto node = std::make_unique<ExpStmt>(CURRENT_LINE);
-        node->setExp(parseCommaExp());
+        node->setExp(parseAssignExp());
         expect(SEMICN);
         return node;
     }
     expect(SEMICN);
-
     return nullptr;
 }
 
@@ -293,7 +298,7 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
 
     expect(IFTK);
     expect(LPARENT);
-    node->setCondition(parseCommaExp());
+    node->setCondition(parseLOrExp());
     expect(RPARENT);
     node->setTrueStmt(parseStmt());
     if (match(ELSETK)) {
@@ -314,7 +319,7 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
     }
     expect(SEMICN);
     if (!match(SEMICN)) {
-        node->setCondition(parseCommaExp());
+        node->setCondition(parseLOrExp());
     } 
     expect(SEMICN);
     if (!match(SEMICN)) {
@@ -349,7 +354,7 @@ std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
 
     expect(RETURNTK);
     if (!match(SEMICN)) {
-        node->setReturnExp(parseCommaExp());
+        node->setReturnExp(parseAddExp());
     }
     expect(SEMICN);
     
@@ -374,12 +379,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
             return parseReturnStmt();
         }
     } else {
-        if (match(SEMICN)) {
-            expect(SEMICN);
-            return nullptr;
-        } else {
-            return parseExpStmt();
-        }
+        return parseExpStmt();
     }
 }
 
@@ -397,7 +397,7 @@ std::unique_ptr<Exp> Parser::parseCommaExp() {
 }
 
 std::unique_ptr<Exp> Parser::parseAssignExp() {
-    auto left = parseLOrExp();
+    auto left = parseAddExp();
 
     if (match(ASSIGN)) {
         expect(ASSIGN);
@@ -525,27 +525,21 @@ std::unique_ptr<Exp> Parser::parseUnaryExp() {
 
 std::unique_ptr<Exp> Parser::parsePostfixExp() {
     auto node = parsePrimaryExp();
-    while (match(LBRACK) || match(LPARENT)) {
+    if (match(LBRACK) || match(LPARENT)) {
         if (match(LBRACK)) {
             expect(LBRACK);
-            if (match(RBRACK)) {
-                expect(RBRACK);
-                std::cout << "Error: Expected expression inside '[]'" << std::endl;
-                continue;
-            }
-            auto postfix = parseCommaExp();
+            auto postfix = parseAddExp();
             expect(RBRACK);
-            node = std::make_unique<SubscriptExp>(std::move(node), std::move(postfix));
+            return std::make_unique<SubscriptExp>(std::move(node), std::move(postfix));
         } else {
             expect(LPARENT);
-            if (match(RPARENT)) {
+            if (!match(RPARENT)) {
+                auto postfix = parseFuncRParams();
                 expect(RPARENT);
-                node = std::make_unique<FunctionCallExp>(std::move(node), std::vector<std::unique_ptr<Exp>>{});
-                continue;
+                return std::make_unique<FunctionCallExp>(std::move(node), std::move(postfix));
             }
-            auto postfix = parseFuncRParams();
             expect(RPARENT);
-            node = std::make_unique<FunctionCallExp>(std::move(node), std::move(postfix));
+            return std::make_unique<FunctionCallExp>(std::move(node), std::vector<std::unique_ptr<Exp>>{});
         }
     }
     return node;
@@ -554,7 +548,7 @@ std::unique_ptr<Exp> Parser::parsePostfixExp() {
 std::unique_ptr<Exp> Parser::parsePrimaryExp() {
     if (match(LPARENT)) {
         expect(LPARENT);
-        auto node = parseCommaExp();
+        auto node = parseAddExp();
         expect(RPARENT);
         return node;
     } else if (match(INTCON) || match(STRCON)) {
@@ -743,7 +737,7 @@ void Parser::parserLog(const AstNode* root) const {
             }
             if (auto fd = dynamic_cast<const FunctionDecl*>(node)) {
                 ofs << indentFn(lvl) << "FunctionDecl (line " << fd->getLine() << "): " << fd->getIdentifier() << "\n";
-                ofs << indentFn(lvl+1) << "ReturnType: " << basicTypeName(fd->getFuncType()) << "\n";
+                ofs << indentFn(lvl+1) << "ReturnType: " << basicTypeName(fd->getReturnType()) << "\n";
                 ofs << indentFn(lvl+1) << "Params:\n";
                 for (size_t i = 0; i < fd->getFormatParamsCount(); ++i) {
                     printNode(fd->getFormatParam(i), lvl+2);

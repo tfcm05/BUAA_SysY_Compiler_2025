@@ -16,7 +16,9 @@ private:
     SymbolTablePtr curScope;
     std::ofstream outputFile;
     std::map<int, std::vector<SymbolInfo>> symbolRecords;
+    
     int loopDepth = 0;
+    TypePtr currentFuncReturnType = nullptr;
 
 public:
     SemanticVisitor();
@@ -24,19 +26,18 @@ public:
 
     void visitCompUnit(AstNode* node);
 private:
-    // Helper to generate type names as per requirements
     std::string getTypeName(SymbolPtr symbol);
+    void addSymbol(const std::string& name, StorageClass sc, TypePtr type, Symbol::SymbolKind kind, int line);
+    void visitVariableDeclarator(VariableDeclarator* node, BasicType dt, TypeQualifier tq, StorageClass sc, int line);
+    void visitFormatParam(FormatParam* node, TypePtr type, int line);
+    void visitFunctionBody(BlockStmt* body, bool needsReturn);
+    void checkPrintfArgs(FunctionCallExp* node, int line);
 
     void visitMainFunctionDecl(FunctionDecl* node);
-    
+
     void visitStmt(Stmt* node);
-
-    void visitVariableDeclarator(VariableDeclarator* node, TypePtr ty, StorageClass sc, int line);
     void visitVariableDecl(VariableDecl* node);
-
-    TypePtr visitFormatParam(FormatParam* node);
     void visitFunctionDecl(FunctionDecl* node);
-
     void visitBlockStmt(BlockStmt* node);
     void visitExpStmt(ExpStmt* node);
     void visitForStmt(ForStmt* node);
@@ -45,14 +46,12 @@ private:
     void visitBreakStmt(BreakStmt* node);
     void visitContinueStmt(ContinueStmt* node);
 
-    TypePtr visitExp(Exp* exp);
-
-    TypePtr visitIdentifierExp(IdentifierExp* node);
-    TypePtr visitLiteralExp(LiteralExp* node);
-    TypePtr visitFunctionCallExp(FunctionCallExp* node);
-    TypePtr visitSubscriptExp(SubscriptExp* node);
-    TypePtr visitUnaryExp(UnaryExp* node);
-    TypePtr visitBinaryExp(BinaryExp* node);
-    TypePtr visitAssignExp(AssignExp* node);
-    
+    TypePtr visitExp(Exp* exp, int line);
+    TypePtr visitIdentifierExp(IdentifierExp* node, int line);
+    TypePtr visitLiteralExp(LiteralExp* node, int line);
+    TypePtr visitFunctionCallExp(FunctionCallExp* node, int line);
+    TypePtr visitSubscriptExp(SubscriptExp* node, int line);
+    TypePtr visitUnaryExp(UnaryExp* node, int line);
+    TypePtr visitBinaryExp(BinaryExp* node, int line);
+    TypePtr visitAssignExp(AssignExp* node, int line);
 };

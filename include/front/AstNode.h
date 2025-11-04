@@ -322,7 +322,7 @@ public:
 
 class FunctionDecl : public Stmt {
     std::string identifier;
-    BasicType funcType;
+    BasicType returnType;
     std::vector<std::unique_ptr<FormatParam>> formatParams;
     std::unique_ptr<BlockStmt> functionBody;
 public:
@@ -331,8 +331,8 @@ public:
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
 
-    BasicType getFuncType() const;
-    void setFuncType(BasicType fType);
+    BasicType getReturnType() const;
+    void setReturnType(BasicType rType);
 
     size_t getFormatParamsCount() const;
     FormatParam* getFormatParam(size_t index) const;

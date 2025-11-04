@@ -278,12 +278,12 @@ void FunctionDecl::setIdentifier(const std::string& id) {
     identifier = id;
 }
 
-BasicType FunctionDecl::getFuncType() const {
-    return funcType;
+BasicType FunctionDecl::getReturnType() const {
+    return returnType;
 }
 
-void FunctionDecl::setFuncType(BasicType fType) {
-    funcType = fType;
+void FunctionDecl::setReturnType(BasicType rType) {
+    returnType = rType;
 }
 
 // FunctionDecl
