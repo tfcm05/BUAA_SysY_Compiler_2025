@@ -1,18 +1,37 @@
-#include<fstream>
-#include"../include/Error.h"
-#include"../include/front/Token.h"
-#include"../include/front/AstNode.h"
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <utility>
+#include <algorithm>
+#include "../include/Error.h"
+#include "../include/front/Token.h"
+#include "../include/front/AstNode.h"
 
-void errorLog(ErrorCode errorCode, int line) {
-    std::ofstream error("error.txt", std::ios::app);
-    error <<  line << " " << char (errorCode + 'a') << std::endl;
-    error.close();
+namespace {
+    struct ErrorInfo {
+        int line;
+        ErrorCode code;
+    };
+
+    std::vector<ErrorInfo> errorList;
 }
 
-void lexerLog(const Token& token) {
-    std::ofstream lexer("lexer.txt", std::ios::app);
-    if (token.getTokenType() == END) return;
-    // lexer << getTypeCode(token.getTokenType()) << " " << token.getValue() << " " << token.getLine() << std::endl;
-    lexer << getTypeCode(token.getTokenType()) << " " << token.getValue() << std::endl;
-    lexer.close();
+void errorLog(ErrorCode errorCode, int line) {
+    errorList.push_back({line, errorCode});
+}
+
+void dumpErrorsToFile() {
+    std::sort(errorList.begin(), errorList.end(), [](const ErrorInfo& a, const ErrorInfo& b) {
+        return a.line < b.line;
+    });
+
+    std::ofstream errorFile("error.txt");
+    if (!errorFile.is_open()) {
+        std::cout << "Error: Could not open error.txt for writing." << std::endl;
+        return;
+    }
+    for (const auto& err : errorList) {
+        errorFile << err.line << " " << static_cast<char>(err.code + 'a') << std::endl;
+    }
+    errorFile.close();
 }
