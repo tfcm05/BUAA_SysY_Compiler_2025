@@ -89,15 +89,33 @@ void Parser::expect(TokenType expect) {
     }
 }
 
-// ----- 类型相关 -----
+// ----- 声明说明符相关 -----
 
-BasicType Parser::parseBasicType() {
+TypeSpecifier Parser::parseTypeSpecifier() {
     if (match(INTTK)) {
         expect(INTTK);
-        return BasicType::INT;
+        return TypeSpecifier::INT;
     } else {
         expect(VOIDTK);
-        return BasicType::VOID;
+        return TypeSpecifier::VOID;
+    }
+}
+
+TypeQualifier Parser::parseTypeQualifier() {
+    if (match(CONSTTK)) {
+        expect(CONSTTK);
+        return TypeQualifier::CONST;
+    } else {
+        return TypeQualifier::NONE;
+    }
+}
+
+StorageClass Parser::parseStorageClass() {
+    if (match(STATICTK)) {
+        expect(STATICTK);
+        return StorageClass::STATIC;
+    } else {
+        return StorageClass::NONE;
     }
 }
 
@@ -106,15 +124,9 @@ BasicType Parser::parseBasicType() {
 std::unique_ptr<VariableDecl> Parser::parseVarDecl() {
     auto node = std::make_unique<VariableDecl>(CURRENT_LINE);
 
-    if (match(CONSTTK)) {
-        expect(CONSTTK);
-        node->setTypeQualifier(TypeQualifier::CONST);
-    } else if (match(STATICTK)) {
-        expect(STATICTK);
-        node->setStorageClass(StorageClass::STATIC);
-    }
-
-    node->setDeclType(parseBasicType());
+    node->setStorageClass(parseStorageClass());
+    node->setTypeQualifier(parseTypeQualifier());
+    node->setVarType(parseTypeSpecifier());
 
     node->addDeclarator(parseVarDeclarator());
     while (match(COMMA)) {
@@ -137,7 +149,6 @@ std::unique_ptr<VariableDeclarator> Parser::parseVarDeclarator() {
         expect(LBRACK);
         node->addDimensionSize(parseAddExp());
         expect(RBRACK);
-        // 支持多维数组
     }
 
     if (match(ASSIGN)) {
@@ -177,7 +188,7 @@ std::vector<std::unique_ptr<Exp>> Parser::parseInitVal() {
 std::unique_ptr<FunctionDecl> Parser::parseFuncDecl() {
     auto node = std::make_unique<FunctionDecl>(CURRENT_LINE);
 
-    node->setReturnType(parseBasicType());
+    node->setReturnType(parseTypeSpecifier());
 
     node->setIdentifier(CURRENT_VALUE);
     expect(IDENFR);
@@ -199,7 +210,7 @@ std::unique_ptr<FunctionDecl> Parser::parseFuncDecl() {
 std::unique_ptr<FunctionDecl> Parser::parseMainFuncDecl() {
     auto node = std::make_unique<FunctionDecl>(CURRENT_LINE);
 
-    node->setReturnType(BasicType::INT);
+    node->setReturnType(TypeSpecifier::INT);
     expect(INTTK);
 
     node->setIdentifier("main");
@@ -234,7 +245,7 @@ std::unique_ptr<FormatParam> Parser::parseFuncFParam() {
     if (match(INTTK)) {
         auto node = std::make_unique<FormatParam>();
 
-        node->setParamType(parseBasicType());
+        node->setParamType(parseTypeSpecifier());
 
         node->setIdentifier(CURRENT_VALUE);
         expect(IDENFR);
@@ -593,11 +604,11 @@ void Parser::parserLog(const AstNode* root) const {
         std::ofstream& ofs;
         decltype(indent)& indentFn;
 
-        const char* basicTypeName(BasicType t) const {
+        const char* basicTypeName(TypeSpecifier t) const {
             switch (t) {
-                case BasicType::INT:  return "INT";
-                case BasicType::VOID: return "VOID";
-                default:              return "UNKNOWN";
+                case TypeSpecifier::INT:  return "INT";
+                case TypeSpecifier::VOID: return "VOID";
+                default:                 return "UNKNOWN";
             }
         }
 
@@ -714,7 +725,7 @@ void Parser::parserLog(const AstNode* root) const {
                 ofs << indentFn(lvl) << "VariableDecl (line " << vds->getLine() << ")\n";
                 ofs << indentFn(lvl+1) << "static=" << (vds->getStorageClass() == StorageClass::STATIC ? 1 : 0)
                     << " const=" << (vds->getTypeQualifier() == TypeQualifier::CONST ? 1 : 0) << "\n";
-                ofs << indentFn(lvl+1) << "Type: " << basicTypeName(vds->getDeclType()) << "\n";
+                ofs << indentFn(lvl+1) << "Type: " << basicTypeName(vds->getVarType()) << "\n";
                 for (size_t i = 0; i < vds->getDeclaratorsCount(); ++i) {
                     printNode(vds->getDeclarator(i), lvl+1);
                 }

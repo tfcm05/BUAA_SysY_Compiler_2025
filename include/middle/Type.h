@@ -26,21 +26,21 @@ private:
     TypeID typeIdentifier;
     TypeQualifier typeQualifier;
 public:
-    Type(TypeID id, TypeQualifier tq = TypeQualifier::NONE) : typeIdentifier(id), typeQualifier(tq) {}
+    Type(TypeID id, TypeQualifier tq = TypeQualifier::NONE);
     virtual ~Type() = default;
-    TypeID getTypeID() const { return typeIdentifier; }
+    TypeID getTypeID() const;
 
-    bool isVoidTy() const { return typeIdentifier == VoidTyID; }
-    bool isIntegerTy() const { return typeIdentifier == IntegerTyID; }
-    bool isCharTy() const { return typeIdentifier == CharTyID; }
-    bool isFunctionTy() const { return typeIdentifier == FunctionTyID; }
-    bool isArrayTy() const { return typeIdentifier == ArrayTyID; }
+    bool isVoidTy() const;
+    bool isIntegerTy() const;
+    bool isCharTy() const;
+    bool isFunctionTy() const;
+    bool isArrayTy() const;
 
-    TypeQualifier getTypeQualifier() const { return typeQualifier; }
+    TypeQualifier getTypeQualifier() const;
 
-    bool isConst() const { return typeQualifier == TypeQualifier::CONST; }
+    bool isConst() const;
 
-    void setTypeQualifier(TypeQualifier tq) { typeQualifier = tq; }
+    void setTypeQualifier(TypeQualifier tq);
 
     bool isCompatibleWith(TypePtr other);
 
@@ -54,27 +54,27 @@ public:
 
 class IntegerType : public Type {
 public:
-    IntegerType() : Type(Type::IntegerTyID) {}
+    IntegerType();
 };
 
 class VoidType : public Type {
 public:
-    VoidType() : Type(Type::VoidTyID) {}
+    VoidType();
 };
 
 class CharType : public Type {
 public:
-    CharType() : Type(Type::CharTyID) {}
+    CharType();
 };
 
 class ArrayType : public Type {
     TypePtr array;
     int size; // -1 for unknown size like func param `int a[]`
 public:
-    ArrayType(TypePtr ty, int n) : Type(Type::ArrayTyID), array(ty), size(n) {}
+    ArrayType(TypePtr ty, int n);
 
-    TypePtr getElementType() const { return array; }
-    int getNumElements() const { return size; }
+    TypePtr getElementType() const;
+    int getNumElements() const;
 };
 
 class FunctionType : public Type {
@@ -82,30 +82,19 @@ class FunctionType : public Type {
     std::vector<TypePtr> paramTypes;
     bool variadicFlag;
 public:
-    FunctionType(TypePtr retTy, const std::vector<TypePtr>& params, bool v = false)
-        : Type(Type::FunctionTyID), returnType(retTy), paramTypes(params), variadicFlag(v) {}
+    FunctionType(TypePtr retTy, const std::vector<TypePtr>& params, bool v = false);
 
-    TypePtr getReturnType() const { return returnType; }
+    TypePtr getReturnType() const;
 
-    const size_t getParamsCount() const { return paramTypes.size(); }
-    TypePtr getParamType(size_t index) const { return paramTypes[index]; }
-    const std::vector<TypePtr>& getParamTypes() const { return paramTypes; }
+    const size_t getParamsCount() const;
+    TypePtr getParamType(size_t index) const;
+    const std::vector<TypePtr>& getParamTypes() const;
 
-    bool isVariadic() const { return variadicFlag; }
-    void setVariadic(bool v) { variadicFlag = v; }
+    bool isVariadic() const;
+    void setVariadic(bool v);
 };
 
-inline bool Type::isCompatibleWith(TypePtr other) {
-    if (this->isIntegerTy() && other->isIntegerTy()) return true;
-    else if (this->isArrayTy() && other->isArrayTy()) {
-        auto thisArr = std::dynamic_pointer_cast<ArrayType>(shared_from_this());
-        auto otherArr = std::dynamic_pointer_cast<ArrayType>(other);
-        return (thisArr->getElementType())->isCompatibleWith((otherArr->getElementType()));
-    }
-    return false;
-}
-
-TypePtr convertToType(BasicType basicType);
-TypePtr convertToType(BasicType basicType, TypeQualifier tq);
+TypePtr convertToType(TypeSpecifier ts);
+TypePtr convertToType(TypeSpecifier ts, TypeQualifier tq);
 
 #endif

@@ -28,7 +28,7 @@ public:
 private:
     std::string getTypeName(SymbolPtr symbol);
     void addSymbol(const std::string& name, StorageClass sc, TypePtr type, Symbol::SymbolKind kind, int line);
-    void visitVariableDeclarator(VariableDeclarator* node, BasicType dt, TypeQualifier tq, StorageClass sc, int line);
+    void visitVariableDeclarator(VariableDeclarator* node, TypeSpecifier ts, TypeQualifier tq, StorageClass sc, int line);
     void visitFormatParam(FormatParam* node, TypePtr type, int line);
     void visitFunctionBody(BlockStmt* body, bool needsReturn);
     void checkPrintfArgs(FunctionCallExp* node, int line);

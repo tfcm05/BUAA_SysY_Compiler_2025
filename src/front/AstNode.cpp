@@ -231,12 +231,12 @@ void VariableDecl::setTypeQualifier(TypeQualifier tq) {
     typeQualifier = tq;
 }
 
-BasicType VariableDecl::getDeclType() const {
-    return DeclType;
+TypeSpecifier VariableDecl::getVarType() const {
+    return typeSpecifier;
 }
 
-void VariableDecl::setDeclType(BasicType type) {
-    DeclType = type;
+void VariableDecl::setVarType(TypeSpecifier type) {
+    typeSpecifier = type;
 }
 
 // VariableDecl
@@ -254,11 +254,11 @@ void FormatParam::setIdentifier(const std::string& id) {
     identifier = id;
 }
 
-BasicType FormatParam::getParamType() const {
+TypeSpecifier FormatParam::getParamType() const {
     return paramType;
 }
 
-void FormatParam::setParamType(BasicType type) {
+void FormatParam::setParamType(TypeSpecifier type) {
     paramType = type;
 }
 
@@ -278,11 +278,11 @@ void FunctionDecl::setIdentifier(const std::string& id) {
     identifier = id;
 }
 
-BasicType FunctionDecl::getReturnType() const {
+TypeSpecifier FunctionDecl::getReturnType() const {
     return returnType;
 }
 
-void FunctionDecl::setReturnType(BasicType rType) {
+void FunctionDecl::setReturnType(TypeSpecifier rType) {
     returnType = rType;
 }
 
