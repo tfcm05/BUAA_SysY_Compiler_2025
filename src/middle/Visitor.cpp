@@ -66,9 +66,9 @@ void SemanticVisitor::addSymbol(const std::string& name, StorageClass sc, TypePt
     symbolRecords[curScope->getScopeId()].push_back({symbol->getName(), getTypeName(symbol)});
 }
 
-void SemanticVisitor::visitVariableDeclarator(VariableDeclarator* node, BasicType dt, TypeQualifier tq, StorageClass sc, int line) {
+void SemanticVisitor::visitVariableDeclarator(VariableDeclarator* node, TypeSpecifier ts, TypeQualifier tq, StorageClass sc, int line) {
     // base type
-    TypePtr baseTy = convertToType(dt, tq);
+    TypePtr baseTy = convertToType(ts, tq);
 
     // full type
     TypePtr type;
@@ -161,27 +161,25 @@ void SemanticVisitor::visitMainFunctionDecl(FunctionDecl* node) {
 void SemanticVisitor::visitStmt(Stmt* node) {
     if (!node) return;
 
-    if (auto p = dynamic_cast<VariableDecl*>(node)) visitVariableDecl(p);
-    else if (auto p = dynamic_cast<FunctionDecl*>(node)) visitFunctionDecl(p);
-    else if (auto p = dynamic_cast<BlockStmt*>(node)) visitBlockStmt(p);
-    else if (auto p = dynamic_cast<ExpStmt*>(node)) visitExpStmt(p);
-    else if (auto p = dynamic_cast<IfStmt*>(node)) visitIfStmt(p);
-    else if (auto p = dynamic_cast<ForStmt*>(node)) visitForStmt(p);
-    else if (auto p = dynamic_cast<ReturnStmt*>(node)) visitReturnStmt(p);
-    else if (auto p = dynamic_cast<BreakStmt*>(node)) visitBreakStmt(p);
-    else if (auto p = dynamic_cast<ContinueStmt*>(node)) visitContinueStmt(p);
-    else {
-        throw std::runtime_error("Unknown AST node type in Visitor");
-    }
+    if (auto p = dynamic_cast<VariableDecl*>(node)) return visitVariableDecl(p);
+    if (auto p = dynamic_cast<FunctionDecl*>(node)) return visitFunctionDecl(p);
+    if (auto p = dynamic_cast<BlockStmt*>(node)) return visitBlockStmt(p);
+    if (auto p = dynamic_cast<ExpStmt*>(node)) return visitExpStmt(p);
+    if (auto p = dynamic_cast<IfStmt*>(node)) return visitIfStmt(p);
+    if (auto p = dynamic_cast<ForStmt*>(node)) return visitForStmt(p);
+    if (auto p = dynamic_cast<ReturnStmt*>(node)) return visitReturnStmt(p);
+    if (auto p = dynamic_cast<BreakStmt*>(node)) return visitBreakStmt(p);
+    if (auto p = dynamic_cast<ContinueStmt*>(node)) return visitContinueStmt(p);
+    throw std::runtime_error("Unknown AST node type in Visitor");
 }
 
 void SemanticVisitor::visitVariableDecl(VariableDecl* node) {
     auto sc = node->getStorageClass();
     auto tq = node->getTypeQualifier();
-    auto dt = node->getDeclType();
+    auto ts = node->getVarType();
     auto line = node->getLine();
     for (size_t i = 0; i < node->getDeclaratorsCount(); ++i) {
-        visitVariableDeclarator(node->getDeclarator(i), dt, tq, sc, line);
+        visitVariableDeclarator(node->getDeclarator(i), ts, tq, sc, line);
     }
 }
 

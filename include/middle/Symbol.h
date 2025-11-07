@@ -21,15 +21,14 @@ private:
     ValuePtr value; // For IR generation
 
 public:
-    Symbol(std::string name, StorageClass storageClass, TypePtr type, SymbolKind kind)
-        : name(name), storageClass(storageClass), type(type), kind(kind), value(nullptr) {}
+    Symbol(std::string name, StorageClass storageClass, TypePtr type, SymbolKind kind);
 
-    const std::string& getName() const { return name; }
-    TypePtr getType() const { return type; }
-    StorageClass getStorageClass() const { return storageClass; }
-    SymbolKind getKind() const { return kind; }
-    ValuePtr getValue() const { return value; }
-    void setValue(ValuePtr v) { value = v; }
+    const std::string& getName() const;
+    TypePtr getType() const;
+    StorageClass getStorageClass() const;
+    SymbolKind getKind() const;
+    ValuePtr getValue() const;
+    void setValue(ValuePtr v);
 };
 
 using SymbolPtr = std::shared_ptr<Symbol>;

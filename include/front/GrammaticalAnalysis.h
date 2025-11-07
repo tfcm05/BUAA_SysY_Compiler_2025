@@ -24,8 +24,10 @@ class Parser {
         std::unique_ptr<CompUnit> parseCompUnit();
         std::unique_ptr<FunctionDecl> parseMainFuncDecl();
 
-        // 类型相关
-        BasicType parseBasicType();
+        // 声明说明符相关
+        TypeSpecifier parseTypeSpecifier();
+        TypeQualifier parseTypeQualifier();
+        StorageClass parseStorageClass();
 
         // 声明相关
         std::unique_ptr<VariableDecl> parseVarDecl();

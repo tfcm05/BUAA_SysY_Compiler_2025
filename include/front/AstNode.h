@@ -10,7 +10,7 @@
 /*
  * this is type part
  */
-enum class BasicType { INT, VOID };
+enum class TypeSpecifier { INT, VOID };
 
 enum class StorageClass { NONE, STATIC, };
 
@@ -25,7 +25,10 @@ public:
  * this is expression part
  */
 
-class Exp : public AstNode { public: virtual ~Exp() = default; };
+class Exp : public AstNode {
+public:
+    virtual ~Exp() = default;
+};
 
 class LiteralExp : public Exp {
 public:
@@ -154,6 +157,7 @@ private:
     int startLine;
 public:
     Stmt(int sl);
+    virtual ~Stmt() = default;
     int getLine() const;
     void setLine(int sl);
 };
@@ -279,7 +283,7 @@ class VariableDecl : public Stmt {
 private:
     StorageClass storageClass;
     TypeQualifier typeQualifier;
-    BasicType DeclType;
+    TypeSpecifier typeSpecifier;
     std::vector<std::unique_ptr<VariableDeclarator>> declarators;
 public:
     VariableDecl(int sl);
@@ -290,8 +294,8 @@ public:
     TypeQualifier getTypeQualifier() const;
     void setTypeQualifier(TypeQualifier typeQualifier);
 
-    BasicType getDeclType() const;
-    void setDeclType(BasicType type);
+    TypeSpecifier getVarType() const;
+    void setVarType(TypeSpecifier type);
 
     size_t getDeclaratorsCount() const;
     VariableDeclarator* getDeclarator(size_t index) const;
@@ -303,7 +307,7 @@ public:
 
 class FormatParam : public AstNode {
     std::string identifier;
-    BasicType paramType;
+    TypeSpecifier paramType;
     std::vector<std::unique_ptr<Exp>> dimensionSizes;
 public:
     FormatParam();
@@ -311,8 +315,8 @@ public:
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
 
-    BasicType getParamType() const;
-    void setParamType(BasicType type);
+    TypeSpecifier getParamType() const;
+    void setParamType(TypeSpecifier type);
 
     size_t getDimensionSizesCount() const;
     Exp* getDimensionSize(size_t index) const;
@@ -322,7 +326,7 @@ public:
 
 class FunctionDecl : public Stmt {
     std::string identifier;
-    BasicType returnType;
+    TypeSpecifier returnType;
     std::vector<std::unique_ptr<FormatParam>> formatParams;
     std::unique_ptr<BlockStmt> functionBody;
 public:
@@ -331,8 +335,8 @@ public:
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
 
-    BasicType getReturnType() const;
-    void setReturnType(BasicType rType);
+    TypeSpecifier getReturnType() const;
+    void setReturnType(TypeSpecifier rType);
 
     size_t getFormatParamsCount() const;
     FormatParam* getFormatParam(size_t index) const;
