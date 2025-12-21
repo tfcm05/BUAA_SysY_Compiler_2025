@@ -1,9 +1,6 @@
 #ifndef ERROR_H
 #define ERROR_H
 
-#include"front/Token.h"
-#include"front/AstNode.h"
-
 typedef enum {
     a, // illegal character
     b, // declared twice
