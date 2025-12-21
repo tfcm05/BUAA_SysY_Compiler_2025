@@ -17,35 +17,38 @@ PrimaryExp: LiteralExp, IdentifierExp
 
 #### 文法
 
+Exp -> CommaExp
+
 BinaryExp -> BinaryExp BinaryOp UnaryExp | UnaryExp
 
-**AssignExp视作一种特殊的BinaryExp**
+**AssignExp, CommaExp视作一种特殊的BinaryExp**
 
 UnaryExp -> UnaryOp UnaryExp | PostfixExp
 
-PostfixExp -> SubscriptExp '['Exp']' | FunctionCallExp '('[RealParams]')' | PrimaryExp
+PostfixExp -> PostfixExp '[' Exp ']' | PostfixExp '('[ Arguments ]')' | PrimaryExp
 
-RealParams -> Exp {,Exp}
+Arguments -> Exp { ',' Exp}
 
-Primary -> LiteralExp | IdentifierExp
+PrimaryExp -> LiteralExp | IdentifierExp | '(' Exp ')'
 
-IdentifierExp -> Identifier ;
+IdentifierExp -> Identifier
 
-LiteralExp -> number | string
+LiteralExp -> Number | String
 
 ### Stmt
 
 #### 分类
 
-Stmt:BlockStmt, ExpStmt, ForStmt, IfStmt,  ContinueStmt, BreakStmt, ReturnStmt, VariableDecl, FunctionDecl
+Stmt: BlockStmt, ExpStmt, ForStmt, IfStmt,  ContinueStmt, BreakStmt, ReturnStmt
 
 #### 文法
 
-Stmt -> BlockStmt | ExpStmt | ... | FunctionDecl
+Stmt -> BlockStmt | ExpStmt | ... | ReturnStmt
 
 1. CompoundStmt
 
-BlockStmt -> '{'{Stmt}'}'
+BlockStmt -> '{' { BlockItem } '}'
+BlockItem -> Stmt | Decl
 
 2. ExpressionStmt
 
@@ -53,87 +56,256 @@ ExpStmt -> Exp;
 
 3. IterationExp
 
-ForStmt -> for'('[Exp];[Exp];[Exp]')'Stmt
+ForStmt -> 'for' '(' [ Exp ] ';' [ Exp ] ';' [ Exp ] ')' Stmt
 
 4. SelectionStmt
 
-IfStmt -> if([Exp])Stmt[else Stmt]
+IfStmt -> 'if' '(' [ Exp ] ')' Stmt [ 'else' Stmt ]
 
 5. JumpStmt
 
-ReturnStmt -> return [Exp];
+ReturnStmt -> return [ Exp ];
 
 BreakStmt
 
 ContinueStmt
 
-6. declaration
+### Decl
 
-VariableDecl -> const BasicType VariableDeclarator {,VariableDeclarator} | [static] BasicType VariableDeclarator {,VariableDeclarator} 
+#### 分类
 
-VariableDeclarator -> Identifier ['['Exp']'] [= Initial]
+Decl: VariableDecl, FunctionDecl, ParameterDecl
 
-Initial -> Exp | '{' Exp {, Exp} '}'
+#### 文法
 
-FunctionDecl -> BasicType Identifier '(' [FormatParams] ')' BlockStmt
+Decl -> VariableDecl | FunctionDecl
 
-FormatParams -> FormatParam {,FormatParam}
+VariableDecl -> DeclSpec Declarator { ',' Declarator } ';'
 
-FormatParam -> BasicType Identifier ['['']']
+FunctionDecl -> DeclSpec Declarator BlockStmt
 
-### Type
+ParameterDecl -> DeclSpec [ Declarator ]
+
+**MainFunctionDecl视作一种特殊的FunctionDecl**
+
+#### Declarator
+
+##### 分类
+
+Declarator: DirectDeclarator, InitialDeclaraor
+
+DirectDecalrator: IdentifierDeclarator, FunctionDeclarator, ArrayDeclarator
+
+##### 文法
+
+Declarator -> DirectDeclarator | InitialDeclaraor
+
+DirectDeclarator -> IdentifierDeclarator | FunctionDeclarator | ArrayDeclarator
+
+IdentifierDeclarator -> Identifier
+
+FunctionDeclarator -> Declarator '(' [ ParameterDecls ] ')'
+
+ParamterDecls -> ParameterDecl { ',' ParameterDecl }
+
+ArrayDeclarator -> Declarator '[' [ Exp ] ']' {, '[' Exp ']'}
+
+InitialDeclarator -> Declarator = Initializer
+
+**ArrayDeclarator的Exp为ConstExp**
+
+#### Initializer
+
+##### 分类
+
+Initializer: ExpInitializer, ListInitializer
+
+##### 文法
+
+Initializer -> ExpInitializer | ListInitializer
+
+ExpInitializer -> Exp
+
+ListInitializer -> '{' [ Initializers ] '}'
+
+Initializers -> Initializer { ',' Initializer }
+
+**若为全局变量，ExpInitializer中的Exp为ConstExp**
+
+### Factory
+
+通过工厂模式，实现类型的唯一化
+
+*以Clang的Type为例*
 
 ```cpp
-class Type : public std::enable_shared_from_this<Type> {
+class Type {
 public:
     enum TypeID {
         VoidTyID,
-        IntegerTyID,
-        FunctionTyID,
-        CharTyID,
+        CharTyID, // i8
+        IntegerTyID, // i32
+
         ArrayTyID,
+        PointerTyID,
+        FunctionTyID,
     };
 private:
     TypeID typeIdentifier;
-    TypeQualifier typeQualifier;
+    unsigned int qualifier;
+    ClangContext& context;
+protected:
+    // 明确通过构造函数创建实例
+    explicit Type(ClangContext& context, TypeID id);
 public:
-    ...
-}
+    // 禁用拷贝构造和赋值操作
+    Type(const Type&) = delete;
+    Type& operator=(const Type&) = delete;
+
+    TypeID getTypeID() const;
+    ClangContext& getContext() const;
+
+    virtual ~Type() = default;
+
+    // 基本类型
+    bool isVoidTy() const;
+    bool isCharTy() const;
+    bool isIntegerTy() const;
+
+    // 派生类型
+    bool isArrayTy() const;
+    bool isPointerTy() const;
+    bool isFunctionTy() const;
+
+    // 限定类型
+    unsigned int getQualifier() const;
+    void setQualifier(unsigned int tq);
+    void addQualifier(unsigned int tq);
+    bool isConst() const;
+};
 ```
 
-TypeQualifier : NONE, CONST
+### Visitor
 
-### Symbol
+通过访问者模式，实现语义分析与中间代码生成两次不同的语法树访问
 
 ```cpp
-class Symbol {
-public:
-    enum SymbolKind {
-        VARIABLE,
-        FUNCTION,
-    };
+class Info;
+using InfoPtr = std::shared_ptr<Info>;
 
+class Info {
+public:
+    virtual ~Info() = default;
+};
+
+class Context;
+using ContextPtr = std::shared_ptr<Context>;
+
+class Context {
+public:
+    virtual ~Context() = default;
+    // ...
+};
+
+class AstVisitor {
+public:
+    virtual ~AstVisitor() = default;
+
+    // Expressions
+    virtual InfoPtr visitLiteralExp(LiteralExp* node, ContextPtr context) = 0;
+    virtual InfoPtr visitIdentifierExp(IdentifierExp* node, ContextPtr context) = 0;
+    
+    //...
+}
+```
+通过虚拟类Info和Context，统一两次访问所需不同上下文的传递
+
+```cpp
+class AstNode {
 private:
-    std::string name;
-    StorageClass storageClass;
-    TypePtr type;
-    SymbolKind kind;
-    ValuePtr value; // For IR generation
-
-    bool isGlobal;
+    // ...
 public:
-    ...
-}
+    // ...
+
+    virtual InfoPtr accept(AstVisitor& visitor, ContextPtr context) = 0;
+};
 ```
+语法树节点通过accept函数接受不同访问者的访问
 
-StorageClass : NONE, STATIC
-
-### visit
+#### 语义分析
 
 ```cpp
-void visitStmt(Stmt* stmt);
+class SemanticInfo : public Info {
+public:
+    enum class InfoKind {
+        DEFAULT,            // 默认
+        CONST_EXP_INFO,   // 常量表达式信息
+    };
+private:
+    InfoKind kind;
 
-TypePtr visitExp(Exp* exp, int line);
+    // 声明的declType和表达式的expType
+    Clang::Type* type;;
+
+    // 表达式
+    bool lValueFlag;
+        // 常量表达式的常量值
+        int64_t constValue;
+
+    // 声明
+    std::string name;
+public:
+    SemanticInfo(InfoKind k = InfoKind::DEFAULT);
+
+    InfoKind getInfoKind() const;
+    void setInfoKind(InfoKind k);
+
+    Clang::Type* getType() const;
+    void setType(Clang::Type* t);
+
+    bool isLValue() const;
+    void setLValueFlag(bool lvf);
+    int64_t getConstValue() const;
+    void setConstValue(int64_t cv);
+
+    std::string getName() const;
+    void setName(const std::string& n);
+};
+
+class SemanticContext : public Context {
+public:
+    enum class VisitPurpose {
+        DEFAULT,           // 默认
+
+        // 声明相关
+        GENERATE_SYMBOL,   // 生成符号
+
+        // 表达式相关
+        CHECK_LVALUE,      // 检查表达式是否为可赋值的左值
+        EVALUATE_CONST,    // 检查表达式是否为编译期常量，并求其值
+
+        // 语句相关
+        // 块语句
+        RESOLVE_FUNCTION_BODY_ONLY // 只解析函数体，不创建新作用域
+    };
+private:
+    VisitPurpose purpose;
+
+    // 函数的returnType和变量的varType
+    Clang::Type* type;
+
+    bool loopFlag;
+public:
+    SemanticContext(VisitPurpose vp = VisitPurpose::DEFAULT);
+    ContextPtr clone() override;
+
+    VisitPurpose getVisitPurpose() const;
+    void setVisitPurpose(VisitPurpose vp);
+
+    Clang::Type* getType() const;
+    void setType(Clang::Type* t);
+
+    bool inLoop() const;
+    void setLoopFlag(bool lf);
+};
 ```
-
-**通过visitExp进行error处理，以及返回当前表达式返回的type**
