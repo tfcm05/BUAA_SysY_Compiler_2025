@@ -1,6 +1,8 @@
 #include "../../../include/MiddleEnd/SemanticAnalysis/ClangContext.h"
 #include "../../../include/MiddleEnd/SemanticAnalysis/Type.h"
+
 #include <unordered_map>
+#include <stdio.h>
 
 namespace Clang {
 
@@ -81,7 +83,6 @@ public:
     }
 
     void scanTypes(unsigned int mode) {
-        /*
         switch (mode)
         {
         case 0:
@@ -113,7 +114,6 @@ public:
         default:
             break;
         }
-        */
     }
 };
 
