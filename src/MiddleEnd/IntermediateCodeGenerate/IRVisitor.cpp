@@ -666,7 +666,7 @@ InfoPtr IRVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
 }
 
 InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
-    /*if (node->getInitial()) {
+    if (node->getInitial()) {
         node->getInitial()->accept(*this, context);
     }
 
@@ -684,22 +684,18 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     Value* conditionValue = nullptr;
     if (node->getCondition()) {
         auto conditionInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, context));
-        conditionValue = materializeValue(conditionInfo);
+        conditionValue = conditionInfo->getValue();
     }
     if (!conditionValue) {
-        conditionValue = getIntConstant(1, 1);
+        conditionValue = builder.createConstInt(llvmContext.getIntegerTyImpl(1), 1);
     }
     builder.createBr(conditionValue, bodyBlock, exitBlock);
 
     builder.setInsertPoint(bodyBlock);
-    continueTargets.push_back(iterBlock);
-    breakTargets.push_back(exitBlock);
     if (node->getBody()) {
         node->getBody()->accept(*this, context);
     }
     builder.createBr(iterBlock);
-    continueTargets.pop_back();
-    breakTargets.pop_back();
 
     builder.setInsertPoint(iterBlock);
     if (node->getIteration()) {
@@ -707,7 +703,7 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     }
     builder.createBr(condBlock);
 
-    builder.setInsertPoint(exitBlock);*/
+    builder.setInsertPoint(exitBlock);
     return nullptr;
 }
 

@@ -235,17 +235,24 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     Clang::Type* currentType = semanticContext->getType();
-    // 一维数组
-    if (node->getArraySize(0) == nullptr) {
-        // T arr[];
-        // 实际上是T*
-        currentType = clangContext.getPointerTyImpl(currentType);
-    } else {
-        // T arr[size];
-        auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(0)->accept(*this, constContext));
-        currentType = clangContext.getArrayTyImpl(currentType, constInfo->getConstValue());
+    for (size_t i = node->getArraySizesCount(); i > 0; --i) {
+        if (i == node->getArraySizesCount()) {
+            // 最内层数组
+            if (node->getArraySize(i - 1) == nullptr) {
+                // T arr[];
+                // 实际上是T*
+                currentType = clangContext.getPointerTyImpl(currentType);
+            } else {
+                // T arr[size];
+                auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
+                currentType = clangContext.getArrayTyImpl(currentType, constInfo->getConstValue());
+            }
+        } else {
+            // 多维数组
+            auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
+            currentType = clangContext.getArrayTyImpl(currentType, constInfo->getConstValue());
+        }
     }
-
     auto arrayContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     arrayContext->setType(currentType);
 
@@ -400,8 +407,6 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
 }
 
 InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
-    // 一维数组
-    // ID [Index]
     auto arrayInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArray()->accept(*this, context));
     if (!arrayInfo->getType() || (!arrayInfo->getType()->isArrayTy() && !arrayInfo->getType()->isPointerTy())) {
         std::cout << "Error: Subscript operator applied to non-array and non-pointer type, line: " << node->getStartLine() << std::endl;
@@ -409,14 +414,18 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     }
     
     auto info = std::make_shared<SemanticInfo>();
-    if (arrayInfo->getType()->isArrayTy()) {
-        auto arrayType = static_cast<Clang::ArrayType*>(arrayInfo->getType());
-        node->getSubscript(0)->accept(*this, context);
-        info->setType(arrayType->getElementType());
-    } else if (arrayInfo->getType()->isPointerTy()) {
-        auto pointerType = static_cast<Clang::PointerType*>(arrayInfo->getType());
-        info->setType(pointerType->getPointedType());
+    auto resultType = arrayInfo->getType();
+    for (size_t i = node->getSubscriptsCount(); i > 0; --i) {
+        node->getSubscript(i - 1)->accept(*this, context);
+        if (resultType->isArrayTy()) {
+            auto arrayType = static_cast<Clang::ArrayType*>(resultType);
+            resultType = arrayType->getElementType();
+        } else if (resultType->isPointerTy()) {
+            auto pointerType = static_cast<Clang::PointerType*>(resultType);
+            resultType = pointerType->getPointedType();
+        }
     }
+    info->setType(resultType);
     info->setLValueFlag(true);
 
     return info;

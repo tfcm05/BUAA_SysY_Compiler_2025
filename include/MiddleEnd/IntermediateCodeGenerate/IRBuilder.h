@@ -19,7 +19,7 @@ private:
 
     std::vector<std::unique_ptr<Value>> ownedValue;
 
-    std::unordered_map<std::string, std::uint32_t> nameCounters;
+    std::unordered_map<std::string, uint32_t> nameCounters;
 
     std::string ensureName(const std::string& prefix, const std::string& name);
     void ensureTerminatorInCurrentFunction();
