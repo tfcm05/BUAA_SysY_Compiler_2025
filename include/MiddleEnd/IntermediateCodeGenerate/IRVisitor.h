@@ -30,12 +30,16 @@ public:
         CREATE_GLOBAL_VARIABLE, // 全局变量
 
         USE_LOCATION_VALUE, // 左值
+
+        SHORT_CIRCUIT_EVAL, // 短路求值
     };
 private:
     visitPurpose purpose;
 
+    Value* values[2];
+
+    // 初始化相关
     LLVM::Type *type;
-    Value* value;
     std::vector<size_t> indices;
 public:
     IRContext();
@@ -43,11 +47,14 @@ public:
     visitPurpose getVisitPurpose() const;
     void setVisitPurpose(visitPurpose vp);
 
-    LLVM::Type* getType() const;
-    void setType(LLVM::Type* ty);
-
     Value* getValue() const;
     void setValue(Value* val);
+
+    Value* getValue(size_t index) const;
+    void setValue(size_t index, Value* val);
+
+    LLVM::Type* getType() const;
+    void setType(LLVM::Type* ty);
 
     size_t getIndicesCount() const;
     size_t getIndex(size_t index) const;

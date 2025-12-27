@@ -105,7 +105,7 @@ Argument* IRBuilder::createArgument(LLVM::Type* type) {
     return arg;
 }
 // BasicBlock
-// void
+// null
 BasicBlock* IRBuilder::createBasicBlock() {
     if (!currentFunction) {
         std::cout << "Error: No current function when creating basic block.\n";
@@ -282,7 +282,6 @@ BrInstr* IRBuilder::createBr(Value* cond, BasicBlock* trueBB, BasicBlock* falseB
     ownedValue.push_back(std::unique_ptr<Value>(brInst));
     return brInst;
 }
-
 // br label <target>
 // null
 BrInstr* IRBuilder::createBr(BasicBlock* target) {
@@ -295,6 +294,20 @@ BrInstr* IRBuilder::createBr(BasicBlock* target) {
     currentBlock->addInstruction(brInst);
     ownedValue.push_back(std::unique_ptr<Value>(brInst));
     return brInst;
+}
+
+// <resul> = phi <type> [<value>, <bb>]...
+// value
+PhiInstr* IRBuilder::createPhi(LLVM::Type* type, std::vector<std::pair<Value*, BasicBlock*>> incomings) {
+    if (!currentBlock) {
+        std::cout << "Error: No current basic block when creating phi instruction.\n";
+        return nullptr;
+    }
+    auto phiInst = new PhiInstr(type, std::move(incomings), ensureName(currentBlock->getName(), "phi"));
+    // 将指令添加到当前基本块
+    currentBlock->addInstruction(phiInst);
+    ownedValue.push_back(std::unique_ptr<Value>(phiInst));
+    return phiInst;
 }
 
 // <result> = getelementptr <type>, <type>* <ptr>{, [inrange] <type> <index>}*

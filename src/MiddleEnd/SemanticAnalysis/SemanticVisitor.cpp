@@ -190,7 +190,6 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
         bodyContext->setVisitPurpose(SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY);
         node->getBody()->accept(*this, bodyContext);
     }
-
     return nullptr;
 }
 
@@ -356,49 +355,46 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     info->setType(funcType->getReturnType());
     info->setLValueFlag(false);
 
-    // 参数
-    if (!funcType->isVariadic()) {
-        // 非可变参
-        if (node->getArgumentsCount() != funcType->getParamTypesCount()) {
-           errorLog(ErrorCode::d, node->getStartLine());
-           return nullptr;
-        } else {
-           for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
-               auto argInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArgument(i)->accept(*this, context));
-               auto argType = argInfo->getType();
-               
-               auto paramType = funcType->getParamType(i);
-               if (!canAssign(paramType, argType)) {
-                   errorLog(ErrorCode::e, node->getStartLine());
-                   return nullptr;
-               }
-           }
-        }
-    } else {
-        // 可变参
+    if (funcType->isVariadic()) {
         // printf
-        {
-            auto formatStrExp = dynamic_cast<LiteralExp*>(node->getArgument(0));
-            if (!formatStrExp || formatStrExp->getLiteralType() != LiteralExp::LiteralType::STRING) {
+        auto formatStrExp = dynamic_cast<LiteralExp*>(node->getArgument(0));
+        if (!formatStrExp || formatStrExp->getLiteralType() != LiteralExp::LiteralType::STRING) {
+            return nullptr;
+        }
+
+        std::string formatStr = formatStrExp->getStringValue();
+         int formatSpecifierCount = 0;
+        for (size_t i = 0; i < formatStr.length(); ++i) {
+            if (formatStr[i] == '%' && i + 1 < formatStr.length() && formatStr[i+1] == 'd') {
+                formatSpecifierCount++;
+                i++; // 跳过 'd'
+            }
+        }
+
+        int realArgCount = node->getArgumentsCount() - 1;
+        if (formatSpecifierCount != realArgCount) {
+            errorLog(ErrorCode::l, node->getStartLine());
+        }
+
+        for (size_t i = 1; i < node->getArgumentsCount(); ++i) {
+            node->getArgument(i)->accept(*this, context);
+        }
+
+        return info;
+    } 
+
+    if (node->getArgumentsCount() != funcType->getParamTypesCount()) {
+        errorLog(ErrorCode::d, node->getStartLine());
+        return nullptr;
+    } else {
+        for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
+            auto argInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArgument(i)->accept(*this, context));
+            auto argType = argInfo->getType();
+               
+            auto paramType = funcType->getParamType(i);
+            if (!canAssign(paramType, argType)) {
+                errorLog(ErrorCode::e, node->getStartLine());
                 return nullptr;
-            }
-
-            std::string formatStr = formatStrExp->getStringValue();
-            int formatSpecifierCount = 0;
-            for (size_t i = 0; i < formatStr.length(); ++i) {
-                if (formatStr[i] == '%' && i + 1 < formatStr.length() && formatStr[i+1] == 'd') {
-                    formatSpecifierCount++;
-                    i++; // 跳过 'd'
-                }
-            }
-
-            int realArgCount = node->getArgumentsCount() - 1;
-            if (formatSpecifierCount != realArgCount) {
-                errorLog(ErrorCode::l, node->getStartLine());
-            }
-
-            for (size_t i = 1; i < node->getArgumentsCount(); ++i) {
-                node->getArgument(i)->accept(*this, context);
             }
         }
     }
@@ -452,7 +448,7 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
                 break;
             case UnaryExp::UnaryOp::NOT:
             default:
-                constValue = 0;
+                constValue = expInfo->getConstValue() == 0 ? 1 : 0;
                 break;
         }
 
@@ -475,30 +471,49 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         int64_t constValue;
+        int64_t lhsConstValue = lhsInfo->getConstValue();
+        int64_t rhsConstValue = rhsInfo->getConstValue();
         switch (node->getBinaryOp()) {
             case BinaryExp::BinaryOp::PLUS:
-                constValue = lhsInfo->getConstValue() + rhsInfo->getConstValue();
+                constValue = lhsConstValue + rhsConstValue;
                 break;
             case BinaryExp::BinaryOp::MINU:
-                constValue = lhsInfo->getConstValue() - rhsInfo->getConstValue();
+                constValue = lhsConstValue - rhsConstValue;
                 break;
             case BinaryExp::BinaryOp::MULT:
-                constValue = lhsInfo->getConstValue() * rhsInfo->getConstValue();
+                constValue = lhsConstValue * rhsConstValue;
                 break;
             case BinaryExp::BinaryOp::DIV:
-                constValue = lhsInfo->getConstValue() / rhsInfo->getConstValue();
+                constValue = lhsConstValue / rhsConstValue;
                 break;
             case BinaryExp::BinaryOp::MOD:
-                constValue = lhsInfo->getConstValue() % rhsInfo->getConstValue();
+                constValue = lhsConstValue % rhsConstValue;
+                break;
+
+            case BinaryExp::BinaryOp::AND:
+                constValue = (lhsConstValue && rhsConstValue) ? 1 : 0;
+                break;
+            case BinaryExp::BinaryOp::OR:
+                constValue = (lhsConstValue || rhsConstValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::EQL:
-            case BinaryExp::BinaryOp::LEQ:
-            case BinaryExp::BinaryOp::GEQ:
-            case BinaryExp::BinaryOp::LSS:
-            case BinaryExp::BinaryOp::GRE:
-            default:
-                constValue = 0;
+                constValue = (lhsConstValue == rhsConstValue) ? 1 : 0;
                 break;
+            case BinaryExp::BinaryOp::LEQ:
+                constValue = (lhsConstValue <= rhsConstValue) ? 1 : 0;
+                break;
+            case BinaryExp::BinaryOp::GEQ:
+                constValue = (lhsConstValue >= rhsConstValue) ? 1 : 0;
+                break;
+            case BinaryExp::BinaryOp::LSS:
+                constValue = (lhsConstValue < rhsConstValue) ? 1 : 0;
+                break;
+            case BinaryExp::BinaryOp::GRE:
+                constValue = (lhsConstValue > rhsConstValue) ? 1 : 0;
+                break;
+            default:
+                std::cout << "Error: Unknown binary operator in constant expression evaluation, line: " << node->getStartLine() << std::endl;
+                return nullptr;
         }
         info->setConstValue(constValue);
     }
@@ -587,25 +602,18 @@ InfoPtr SemanticVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     auto returnType = semanticContext->getType();
 
-    if (returnType->isVoidTy()) {
-        if (node->getReturnExp()) {
-            errorLog(ErrorCode::f, node->getStartLine());
-        }
-    }
+    if (node->getReturnExp()) {
+        node->getReturnExp()->accept(*this, context);
+    } else if (!returnType->isVoidTy()) {
+        errorLog(ErrorCode::f, node->getStartLine());
+    } 
 
     return nullptr;
 }
 
 InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() != SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY) {
-        ScopeGuard guard(curScope);
-        for (size_t i = 0; i < node->getBlockItemsCount(); ++i) {
-            if (node->getBlockItem(i)) {
-                node->getBlockItem(i)->accept(*this, context);
-            }
-        }
-    } else {
+    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY) {
         auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
         cloneContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
 
@@ -624,6 +632,13 @@ InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
                 if (dynamic_cast<ReturnStmt*>(lastBlockItem) == nullptr) {
                     errorLog(ErrorCode::g, node->getEndLine());
                 }
+            }
+        }
+    } else {
+        ScopeGuard guard(curScope);
+        for (size_t i = 0; i < node->getBlockItemsCount(); ++i) {
+            if (node->getBlockItem(i)) {
+                node->getBlockItem(i)->accept(*this, context);
             }
         }
     }
