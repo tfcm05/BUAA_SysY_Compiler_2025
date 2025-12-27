@@ -139,6 +139,16 @@ void BrInstr::setTrueBlock(BasicBlock* newTrueBlock) { trueBB = newTrueBlock; }
 BasicBlock* BrInstr::getFalseBlock() const { return falseBB; }
 void BrInstr::setFalseBlock(BasicBlock* newFalseBlock) { falseBB = newFalseBlock; }
 
+// phi instruction
+PhiInstr::PhiInstr(LLVM::Type* type, std::vector<std::pair<Value*, BasicBlock*>> incoming, const std::string& name)
+	: Instruction(type, name, false), incomingValues(std::move(incoming)) {}
+
+void PhiInstr::addIncoming(Value* value, BasicBlock* block) { incomingValues.emplace_back(value, block); }
+size_t PhiInstr::getIncomingCount() const { return incomingValues.size(); }
+std::pair<Value*, BasicBlock*> PhiInstr::getIncoming(size_t index) const { return incomingValues.at(index); }
+void PhiInstr::setIncoming(std::vector<std::pair<Value*, BasicBlock*>> newIncomingValues) { incomingValues = std::move(newIncomingValues); }
+const std::vector<std::pair<Value*, BasicBlock*>>& PhiInstr::getIncomingValues() const { return incomingValues; }
+
 // return instruction
 RetInstr::RetInstr(Value* returnValue, const std::string& name)
 	: Instruction(returnValue ? returnValue->getType() : nullptr, name, true), returnValue(returnValue) {}

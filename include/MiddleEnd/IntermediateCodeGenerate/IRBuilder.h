@@ -75,6 +75,9 @@ public:
     BrInstr* createBr(Value* cond, BasicBlock* trueBB, BasicBlock* falseBB = nullptr);
     BrInstr* createBr(BasicBlock* target);
 
+    // <result> = phi <type> [<value>, <bb>]...
+    PhiInstr* createPhi(LLVM::Type* type, std::vector<std::pair<Value*, BasicBlock*>> incomings);
+
     // <result> = getelementptr <type>, <type>* <ptr>, <index>...
     GetElementPtrInst* createGEP(Value* ptr, std::vector<Value*> indices);
 

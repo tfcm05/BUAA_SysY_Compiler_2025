@@ -21,6 +21,19 @@ public:
     void setFalseBlock(BasicBlock* newFalseBlock);
 };
 
+class PhiInstr : public Instruction {
+private:
+    std::vector<std::pair<Value*, BasicBlock*>> incomingValues;
+public:
+    PhiInstr(LLVM::Type* type, std::vector<std::pair<Value*, BasicBlock*>> incoming, const std::string& name);
+
+    void addIncoming(Value* value, BasicBlock* block);
+    size_t getIncomingCount() const;
+    std::pair<Value*, BasicBlock*> getIncoming(size_t index) const;
+    void setIncoming(std::vector<std::pair<Value*, BasicBlock*>> newIncomingValues);
+    const std::vector<std::pair<Value*, BasicBlock*>>& getIncomingValues() const;
+};
+
 class RetInstr : public Instruction {
 private:
     Value* returnValue;

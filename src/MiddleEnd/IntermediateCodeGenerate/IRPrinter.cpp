@@ -260,7 +260,7 @@ void IRPrinter::printInstruction(const Instruction* inst, std::ostream& os) cons
     }
     if (auto icmpI = dynamic_cast<const IcmpInstr*>(inst)) {
         os << formatValue(icmpI) << " = icmp " << formatIcmpOp(icmpI->getPredicate()) << " "
-           << formatType(icmpI->getType()) << " " << formatValue(icmpI->getLHS())
+           << formatType(icmpI->getLHS()->getType()) << " " << formatValue(icmpI->getLHS())
            << ", " << formatValue(icmpI->getRHS());
         return;
     }
@@ -297,6 +297,15 @@ void IRPrinter::printInstruction(const Instruction* inst, std::ostream& os) cons
             os << "ret " << formatType(retI->getReturnValue()->getType()) << " " << formatValue(retI->getReturnValue());
         } else {
             os << "ret void";
+        }
+        return;
+    }
+    if (auto phiI = dynamic_cast<const PhiInstr*>(inst)) {
+        os << formatValue(phiI) << " = phi " << formatType(phiI->getType()) << " ";
+        for (size_t i = 0; i < phiI->getIncomingCount(); ++i) {
+            if (i) os << ", ";
+            auto [val, bb] = phiI->getIncoming(i);
+            os << "[" << formatValue(val) << ", %" << bb->getName() << "]";
         }
         return;
     }

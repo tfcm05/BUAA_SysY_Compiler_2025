@@ -14,11 +14,14 @@ IRContext::IRContext()
 IRContext::visitPurpose IRContext::getVisitPurpose() const { return purpose; }
 void IRContext::setVisitPurpose(visitPurpose vp) { purpose = vp; }
 
+Value* IRContext::getValue() const { return values[0]; }
+void IRContext::setValue(Value* val) { values[0] = val; }
+
+Value* IRContext::getValue(size_t index) const { return values[index]; }
+void IRContext::setValue(size_t index, Value* val) { values[index] = val; }
+
 LLVM::Type* IRContext::getType() const { return type; }
 void IRContext::setType(LLVM::Type* ty) { type = ty; }
-
-Value* IRContext::getValue() const { return value; }
-void IRContext::setValue(Value* val) { value = val; }
 
 size_t IRContext::getIndicesCount() const { return indices.size(); }
 size_t IRContext::getIndex(size_t index) const { return indices.at(index); }
@@ -28,8 +31,11 @@ const std::vector<size_t>& IRContext::getIndices() const { return indices; }
 ContextPtr IRContext::clone() {
     auto cloned = std::make_shared<IRContext>();
     cloned->setVisitPurpose(purpose);
+    
+    cloned->values[0] = values[0];
+    cloned->values[1] = values[1];
+    
     cloned->setType(type);
-    cloned->setValue(value);
     cloned->indices = indices;
     return cloned;
 }
@@ -317,11 +323,14 @@ InfoPtr IRVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr context) {
     auto symbol = node->getSymbol();
     if (!symbol) {
         std::cout << "Error: IdentifierExp has no associated symbol.\n";
+        std::cout << "Line: " << node->getStartLine() << std::endl;
+        std::cout << "Identifier: " << node->getIdentifier() << std::endl;
         return nullptr;
     }
 
     auto value = symbol->getValue();
     if (!value) {
+        // builtin functions
         if (symbol->getKind() == Symbol::FUNCTION) {
             if (symbol->getName() == "getint") {
                 auto getintType = llvmContext.getFunctionTyImpl(
@@ -425,6 +434,7 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
 
     auto funcType = static_cast<LLVM::FunctionType*>(function->getType());
     if (funcType->isVariadicFunc()) {
+        std::cout << "Processing variadic function call.\n";
         // printf
         auto printfNode = dynamic_cast<IdentifierExp*>(node->getFunction());
         if (!printfNode || printfNode->getSymbol()->getName() != "printf") {
@@ -566,11 +576,83 @@ InfoPtr IRVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
 }
 
 InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
-    auto lhsIRInfo = std::dynamic_pointer_cast<IRInfo>(node->getLhs()->accept(*this, context));
-    auto rhsIRInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
+    auto ensureBoolean = [&](Value* value) -> Value* {
+        if (!value) {
+            std::cout << "Error: Null value encountered during boolean coercion.\n";
+            return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+        }
+        if (auto constInt = dynamic_cast<ConstantInt*>(value)) {
+            if (constInt->getValue() != 0) {
+                return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 1);
+            } else {
+                return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+            }
+        }
+        auto valueType = value->getType();
+        if (valueType && valueType->isInteger()) {
+            auto integerType = static_cast<LLVM::IntegerType*>(valueType);
+            if (integerType->getBitWidth() == 1) {
+                return value;
+            }
+            auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
+            return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
+        }
+        std::cout << "Error: Unsupported value type for boolean coercion.\n";
+        return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+    };
 
-    auto lhsValue = lhsIRInfo->getValue();
-    auto rhsValue = rhsIRInfo->getValue();
+    auto lhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getLhs()->accept(*this, context));
+    auto lhsValue = lhsInfo ? lhsInfo->getValue() : nullptr;
+
+    switch (node->getBinaryOp()) {
+        case BinaryExp::BinaryOp::AND: {
+            auto currentBlock = builder.getInsertBlock();
+            auto rhsBlock = builder.createBasicBlock();
+            auto mergeBlock = builder.createBasicBlock();
+
+            builder.setInsertPoint(currentBlock);
+            auto lhsBool = ensureBoolean(lhsValue);
+            builder.createBr(lhsBool, rhsBlock, mergeBlock);
+
+            builder.setInsertPoint(rhsBlock);
+            auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
+            auto rhsBool = ensureBoolean(rhsInfo ? rhsInfo->getValue() : nullptr);
+            builder.createBr(mergeBlock);
+
+            builder.setInsertPoint(mergeBlock);
+            std::vector<std::pair<Value*, BasicBlock*>> incomings;
+            incomings.emplace_back(builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0), currentBlock);
+            incomings.emplace_back(rhsBool, rhsBlock);
+            auto phi = builder.createPhi(llvmContext.getIntegerTyImpl(1), std::move(incomings));
+            return std::make_shared<IRInfo>(phi);
+        }
+        case BinaryExp::BinaryOp::OR: {
+            auto currentBlock = builder.getInsertBlock();
+            auto rhsBlock = builder.createBasicBlock();
+            auto mergeBlock = builder.createBasicBlock();
+
+            builder.setInsertPoint(currentBlock);
+            auto lhsBool = ensureBoolean(lhsValue);
+            builder.createBr(lhsBool, mergeBlock, rhsBlock);
+
+            builder.setInsertPoint(rhsBlock);
+            auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
+            auto rhsBool = ensureBoolean(rhsInfo ? rhsInfo->getValue() : nullptr);
+            builder.createBr(mergeBlock);
+
+            builder.setInsertPoint(mergeBlock);
+            std::vector<std::pair<Value*, BasicBlock*>> incomings;
+            incomings.emplace_back(builder.createConstInt(llvmContext.getIntegerTyImpl(1), 1), currentBlock);
+            incomings.emplace_back(rhsBool, rhsBlock);
+            auto phi = builder.createPhi(llvmContext.getIntegerTyImpl(1), std::move(incomings));
+            return std::make_shared<IRInfo>(phi);
+        }
+        default:
+            break;
+    }
+
+    auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
+    auto rhsValue = rhsInfo ? rhsInfo->getValue() : nullptr;
 
     switch (node->getBinaryOp()) {
         case BinaryExp::BinaryOp::PLUS: {
@@ -594,15 +676,6 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         case BinaryExp::BinaryOp::DIV: {
             auto divValue = builder.createSdiv(lhsValue, rhsValue);
             return std::make_shared<IRInfo>(divValue);
-        }
-
-        case BinaryExp::BinaryOp::AND: {
-            auto andValue = builder.createAnd(lhsValue, rhsValue);
-            return std::make_shared<IRInfo>(andValue);
-        }
-        case BinaryExp::BinaryOp::OR: {
-            auto orValue = builder.createOr(lhsValue, rhsValue);
-            return std::make_shared<IRInfo>(orValue);
         }
         case BinaryExp::BinaryOp::EQL: {
             auto eqValue = builder.createIcmp(IcmpInstr::IcmpOp::EQ, lhsValue, rhsValue);
@@ -628,7 +701,6 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             auto geqValue = builder.createIcmp(IcmpInstr::IcmpOp::SGE, lhsValue, rhsValue);
             return std::make_shared<IRInfo>(geqValue);
         }
-
         default:
             return nullptr;
     }
@@ -681,19 +753,48 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     builder.createBr(condBlock);
 
     builder.setInsertPoint(condBlock);
-    Value* conditionValue = nullptr;
     if (node->getCondition()) {
-        auto conditionInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, context));
-        conditionValue = conditionInfo->getValue();
+        auto ensureBoolean = [&](Value* value) -> Value* {
+            if (!value) {
+                std::cout << "Error: Null for-loop condition value.\n";
+                return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+            }
+            if (auto constInt = dynamic_cast<ConstantInt*>(value)) {
+                if (constInt->getValue() != 0) {
+                    return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 1);
+                } else {
+                    return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+                }
+            }
+            auto valueType = value->getType();
+            if (valueType && valueType->isInteger()) {
+                auto integerType = static_cast<LLVM::IntegerType*>(valueType);
+                if (integerType->getBitWidth() == 1) {
+                    return value;
+                }
+                auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
+                return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
+            }
+            std::cout << "Error: Unsupported for-loop condition type.\n";
+            return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+        };
+
+        auto condContext = context ? context->clone() : std::make_shared<IRContext>();
+        auto condInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, condContext));
+        auto condValue = ensureBoolean(condInfo ? condInfo->getValue() : nullptr);
+        builder.createBr(condValue, bodyBlock, exitBlock);
+    } else {
+        builder.createBr(bodyBlock);
     }
-    if (!conditionValue) {
-        conditionValue = builder.createConstInt(llvmContext.getIntegerTyImpl(1), 1);
-    }
-    builder.createBr(conditionValue, bodyBlock, exitBlock);
+
+
+    auto bodyContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+    bodyContext->setValue(0, iterBlock);
+    bodyContext->setValue(1, exitBlock);
 
     builder.setInsertPoint(bodyBlock);
     if (node->getBody()) {
-        node->getBody()->accept(*this, context);
+        node->getBody()->accept(*this, bodyContext);
     }
     builder.createBr(iterBlock);
 
@@ -708,50 +809,71 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
 }
 
 InfoPtr IRVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
-    /*if (!node || !node->getCondition()) {
-        return nullptr;
-    }
-
-    auto conditionInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, context));
-    auto conditionValue = materializeValue(conditionInfo);
-    if (!conditionValue) {
-        conditionValue = getIntConstant(1, 1);
-    }
-
-    auto currentBlock = builder.getInsertBlock();
-    auto thenBlock = createBlock("if.then");
-    BasicBlock* elseBlock = nullptr;
+    auto entryBlock = builder.getInsertBlock();
+    auto trueBlock = builder.createBasicBlock();
+    BasicBlock* falseBlock = nullptr;
     if (node->getFalseStmt()) {
-        elseBlock = createBlock("if.else");
+        falseBlock = builder.createBasicBlock();
     }
-    auto mergeBlock = createBlock("if.end");
+    auto mergeBlock = builder.createBasicBlock();
 
-    builder.setInsertPoint(currentBlock);
-    builder.createBr(conditionValue, thenBlock, elseBlock ? elseBlock : mergeBlock);
+    builder.setInsertPoint(entryBlock);
+    auto ensureBoolean = [&](Value* value) -> Value* {
+        if (!value) {
+            std::cout << "Error: Null if-condition value.\n";
+            return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+        }
+        auto valueType = value->getType();
+        if (valueType && valueType->isInteger()) {
+            auto integerType = static_cast<LLVM::IntegerType*>(valueType);
+            if (integerType->getBitWidth() == 1) {
+                return value;
+            }
+            auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
+            return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
+        }
+        std::cout << "Error: Unsupported if-condition type.\n";
+        return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
+    };
 
-    builder.setInsertPoint(thenBlock);
+    auto condContext = context ? context->clone() : std::make_shared<IRContext>();
+    auto condInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, condContext));
+    auto condValue = ensureBoolean(condInfo ? condInfo->getValue() : nullptr);
+    builder.createBr(condValue, trueBlock, falseBlock ? falseBlock : mergeBlock);
+
+    builder.setInsertPoint(trueBlock);
     if (node->getTrueStmt()) {
         node->getTrueStmt()->accept(*this, context);
     }
-    builder.createBr(mergeBlock);
-
-    if (elseBlock) {
-        builder.setInsertPoint(elseBlock);
-        if (node->getFalseStmt()) {
-            node->getFalseStmt()->accept(*this, context);
-        }
+    if (!trueBlock->isTerminator()) {
         builder.createBr(mergeBlock);
     }
 
-    builder.setInsertPoint(mergeBlock);*/
+    if (falseBlock) {
+        builder.setInsertPoint(falseBlock);
+        node->getFalseStmt()->accept(*this, context);
+        if (!falseBlock->isTerminator()) {
+            builder.createBr(mergeBlock);
+        }
+    }
+
+    builder.setInsertPoint(mergeBlock);
     return nullptr;
 }
 
 InfoPtr IRVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
+    auto breakContext = std::dynamic_pointer_cast<IRContext>(context);
+    auto breakTarget = dynamic_cast<BasicBlock*>(breakContext->getValue(1));
+    builder.createBr(breakTarget);
+
     return nullptr;
 }
 
 InfoPtr IRVisitor::visitContinueStmt(ContinueStmt* node, ContextPtr context) {
+    auto continueContext = std::dynamic_pointer_cast<IRContext>(context);
+    auto continueTarget = dynamic_cast<BasicBlock*>(continueContext->getValue(0));
+    builder.createBr(continueTarget);
+
     return nullptr;
 }
 
@@ -764,6 +886,7 @@ InfoPtr IRVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
     auto returnIRInfo = std::dynamic_pointer_cast<IRInfo>(node->getReturnExp()->accept(*this, context));
     auto returnValue = returnIRInfo->getValue();
     builder.createRet(returnValue);
+
     return nullptr;
 }
 
