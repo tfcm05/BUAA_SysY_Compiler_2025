@@ -434,7 +434,6 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
 
     auto funcType = static_cast<LLVM::FunctionType*>(function->getType());
     if (funcType->isVariadicFunc()) {
-        std::cout << "Processing variadic function call.\n";
         // printf
         auto printfNode = dynamic_cast<IdentifierExp*>(node->getFunction());
         if (!printfNode || printfNode->getSymbol()->getName() != "printf") {
@@ -845,15 +844,21 @@ InfoPtr IRVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
     if (node->getTrueStmt()) {
         node->getTrueStmt()->accept(*this, context);
     }
-    if (!trueBlock->isTerminator()) {
-        builder.createBr(mergeBlock);
+    {
+        auto afterTrueBlock = builder.getInsertBlock();
+        if (afterTrueBlock && !afterTrueBlock->isTerminator()) {
+            builder.createBr(mergeBlock);
+        }
     }
 
     if (falseBlock) {
         builder.setInsertPoint(falseBlock);
         node->getFalseStmt()->accept(*this, context);
-        if (!falseBlock->isTerminator()) {
-            builder.createBr(mergeBlock);
+        {
+            auto afterFalseBlock = builder.getInsertBlock();
+            if (afterFalseBlock && !afterFalseBlock->isTerminator()) {
+                builder.createBr(mergeBlock);
+            }
         }
     }
 
@@ -910,9 +915,4 @@ InfoPtr IRVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr context)
 InfoPtr IRVisitor::visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) {
     return nullptr;
 }
-
-
-
-
-
 
