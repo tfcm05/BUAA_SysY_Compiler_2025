@@ -624,12 +624,13 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             builder.setInsertPoint(rhsBlock);
             auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
             auto rhsBool = ensureBoolean(rhsInfo ? rhsInfo->getValue() : nullptr);
+            auto rhsEndBlock = builder.getInsertBlock();
             builder.createBr(mergeBlock);
 
             builder.setInsertPoint(mergeBlock);
             std::vector<std::pair<Value*, BasicBlock*>> incomings;
             incomings.emplace_back(builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0), currentBlock);
-            incomings.emplace_back(rhsBool, rhsBlock);
+            incomings.emplace_back(rhsBool, rhsEndBlock);
             auto phi = builder.createPhi(llvmContext.getIntegerTyImpl(1), std::move(incomings));
             return std::make_shared<IRInfo>(phi);
         }
@@ -645,12 +646,13 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             builder.setInsertPoint(rhsBlock);
             auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
             auto rhsBool = ensureBoolean(rhsInfo ? rhsInfo->getValue() : nullptr);
+            auto rhsEndBlock = builder.getInsertBlock();
             builder.createBr(mergeBlock);
 
             builder.setInsertPoint(mergeBlock);
             std::vector<std::pair<Value*, BasicBlock*>> incomings;
             incomings.emplace_back(builder.createConstInt(llvmContext.getIntegerTyImpl(1), 1), currentBlock);
-            incomings.emplace_back(rhsBool, rhsBlock);
+            incomings.emplace_back(rhsBool, rhsEndBlock);
             auto phi = builder.createPhi(llvmContext.getIntegerTyImpl(1), std::move(incomings));
             return std::make_shared<IRInfo>(phi);
         }
