@@ -110,4 +110,14 @@ public:
     void setRHS(Value* newRHS);
 };
 
+class ZextInstr : public Instruction {
+private:
+    Value* operand;
+public:
+    ZextInstr(LLVM::Type* type, Value* operand, const std::string& name);
+
+    Value* getOperand() const;
+    void setOperand(Value* newOperand);
+};
+
 #endif
