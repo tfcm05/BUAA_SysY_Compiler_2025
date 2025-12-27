@@ -318,7 +318,9 @@ GetElementPtrInst* IRBuilder::createGEP(Value* ptr, std::vector<Value*> indices)
         return nullptr;
     }
     auto type = ptr->getType();
-    for (size_t i = 0; i < indices.size(); ++i) {
+    // indices的第一个元素对应ptr指向的类型，后续元素对应逐级解引用后的类型
+    // 所以从第二个元素开始处理
+    for (size_t i = 1; i < indices.size(); ++i) {
         if (!type->isPointer() && !type->isArray()) {
             std::cout << "Error: Attempting to get pointer from a non-pointer and non-array type";
             return nullptr;
