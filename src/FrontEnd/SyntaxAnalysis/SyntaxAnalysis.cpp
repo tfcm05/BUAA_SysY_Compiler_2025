@@ -234,6 +234,10 @@ BlockStmtPtr Parser::parseBlockStmt() {
     expect(LBRACE);
     
     while (!match(RBRACE)) {
+        if (match(SEMICN)) {
+            expect(SEMICN);
+            continue;
+        }
         if (match(STATICTK) || match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
             node->addBlockItem(parseVarDecl());
         } else {

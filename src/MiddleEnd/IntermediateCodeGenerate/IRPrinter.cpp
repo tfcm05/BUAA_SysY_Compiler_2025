@@ -264,6 +264,11 @@ void IRPrinter::printInstruction(const Instruction* inst, std::ostream& os) cons
            << ", " << formatValue(icmpI->getRHS());
         return;
     }
+    if (auto zextI = dynamic_cast<const ZextInstr*>(inst)) {
+        os << formatValue(zextI) << " = zext " << formatType(zextI->getOperand()->getType()) << " " << formatValue(zextI->getOperand())
+           << " to " << formatType(zextI->getType());
+        return;
+    }
 
     // Call
     if (auto callI = dynamic_cast<const CallInstr*>(inst)) {

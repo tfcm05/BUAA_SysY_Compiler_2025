@@ -71,6 +71,9 @@ public:
     // <result> = icmp <IcmpOp> <ty> <op1>, <op2>
     IcmpInstr* createIcmp(IcmpInstr::IcmpOp op, Value* lhs, Value* rhs);
 
+    // zero-extend <operand> to <type>
+    ZextInstr* createZext(LLVM::Type* toType, Value* operand);
+
     // br <cond>, <trueBB>, <falseBB>
     BrInstr* createBr(Value* cond, BasicBlock* trueBB, BasicBlock* falseBB = nullptr);
     BrInstr* createBr(BasicBlock* target);

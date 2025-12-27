@@ -109,6 +109,13 @@ void OrInstr::setLHS(Value* newLHS) { lhs = newLHS; }
 Value* OrInstr::getRHS() const { return rhs; }
 void OrInstr::setRHS(Value* newRHS) { rhs = newRHS; }
 
+// zero-extend instruction
+ZextInstr::ZextInstr(LLVM::Type* type, Value* operand, const std::string& name)
+	: Instruction(type, name, false), operand(operand) {}
+
+Value* ZextInstr::getOperand() const { return operand; }
+void ZextInstr::setOperand(Value* newOperand) { operand = newOperand; }
+
 // integer comparison instruction
 IcmpInstr::IcmpInstr(IcmpOp op, LLVM::Type* type, Value* lhs, Value* rhs, const std::string& name)
 	: Instruction(type, name, false), op(op), lhs(lhs), rhs(rhs) {}

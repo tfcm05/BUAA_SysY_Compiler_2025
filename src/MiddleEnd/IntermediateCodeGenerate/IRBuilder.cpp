@@ -318,9 +318,7 @@ GetElementPtrInst* IRBuilder::createGEP(Value* ptr, std::vector<Value*> indices)
         return nullptr;
     }
     auto type = ptr->getType();
-    // indices的第一个元素对应ptr指向的类型，后续元素对应逐级解引用后的类型
-    // 所以从第二个元素开始处理
-    for (size_t i = 1; i < indices.size(); ++i) {
+    for (size_t i = 0; i < indices.size(); ++i) {
         if (!type->isPointer() && !type->isArray()) {
             std::cout << "Error: Attempting to get pointer from a non-pointer and non-array type";
             return nullptr;
@@ -353,4 +351,15 @@ CallInstr* IRBuilder::createCall(Function* func, std::vector<Value*> args) {
     currentBlock->addInstruction(callInst);
     ownedValue.push_back(std::unique_ptr<Value>(callInst));
     return callInst;
+}
+
+ZextInstr* IRBuilder::createZext(LLVM::Type* toType, Value* operand) {
+    if (!currentBlock) {
+        std::cout << "Error: No current basic block when creating zext instruction." << std::endl;
+        return nullptr;
+    }
+    auto zextInst = new ZextInstr(toType, operand, ensureName(currentBlock->getName(), "zext"));
+    currentBlock->addInstruction(zextInst);
+    ownedValue.push_back(std::unique_ptr<Value>(zextInst));
+    return zextInst;
 }

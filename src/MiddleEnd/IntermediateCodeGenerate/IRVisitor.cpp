@@ -521,7 +521,6 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
 
 InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
     std::vector<Value*> indices;
-    indices.push_back(builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0));
     for (size_t i = 0; i < node->getSubscriptsCount(); ++i) {
         auto indexInfo = std::dynamic_pointer_cast<IRInfo>(node->getSubscript(i)->accept(*this, context));
         auto index = indexInfo->getValue();
@@ -536,6 +535,10 @@ InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
             std::cout << "Error: SubscriptExp array has no associated value.\n";
             return nullptr;
         }
+        auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
+        if (ptrType->getPointedType()->isArray()) {
+            indices.insert(indices.begin(), builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0));
+        }
         auto elementPtr = builder.createGEP(ptr, std::move(indices));
         return std::make_shared<IRInfo>(elementPtr);
     } else {
@@ -546,6 +549,10 @@ InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
         if (!ptr) {
             std::cout << "Error: SubscriptExp array has no associated value.\n";
             return nullptr;
+        }
+        auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
+        if (ptrType->getPointedType()->isArray()) {
+            indices.insert(indices.begin(), builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0));
         }
         auto elementPtr = builder.createGEP(ptr, std::move(indices));
         auto loadInst = builder.createLoad(elementPtr);
@@ -567,7 +574,8 @@ InfoPtr IRVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
         }
         case UnaryExp::UnaryOp::NOT: {
             auto boolValue = builder.createIcmp(IcmpInstr::IcmpOp::EQ, expValue, builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0));
-            return std::make_shared<IRInfo>(boolValue);
+            auto intResult = builder.createZext(llvmContext.getIntegerTyImpl(32), boolValue);
+            return std::make_shared<IRInfo>(intResult);
         }
         default:
             return nullptr;
