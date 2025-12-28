@@ -547,7 +547,9 @@ InfoPtr SemanticVisitor::visitCommaExp(CommaExp* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
-    node->getExp()->accept(*this, context);
+    if (node->getExp()) {
+        node->getExp()->accept(*this, context);
+    }
 
     return nullptr;
 }
@@ -618,9 +620,7 @@ InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
         cloneContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
 
         for (size_t i = 0; i < node->getBlockItemsCount(); ++i) {
-            if (node->getBlockItem(i)) {
-                node->getBlockItem(i)->accept(*this, cloneContext);
-            }
+            node->getBlockItem(i)->accept(*this, cloneContext);
         }
         
         auto returnType = semanticContext->getType();
@@ -637,9 +637,7 @@ InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
     } else {
         ScopeGuard guard(curScope);
         for (size_t i = 0; i < node->getBlockItemsCount(); ++i) {
-            if (node->getBlockItem(i)) {
-                node->getBlockItem(i)->accept(*this, context);
-            }
+            node->getBlockItem(i)->accept(*this, context);
         }
     }
 
