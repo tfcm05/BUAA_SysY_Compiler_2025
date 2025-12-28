@@ -353,12 +353,13 @@ CallInstr* IRBuilder::createCall(Function* func, std::vector<Value*> args) {
     return callInst;
 }
 
-ZextInstr* IRBuilder::createZext(LLVM::Type* toType, Value* operand) {
+ZextInstr* IRBuilder::createZext(LLVM::Type* type, Value* operand) {
     if (!currentBlock) {
         std::cout << "Error: No current basic block when creating zext instruction." << std::endl;
         return nullptr;
     }
-    auto zextInst = new ZextInstr(toType, operand, ensureName(currentBlock->getName(), "zext"));
+    auto zextInst = new ZextInstr(type, operand, ensureName(currentBlock->getName(), "zext"));
+    // 将指令添加到当前基本块
     currentBlock->addInstruction(zextInst);
     ownedValue.push_back(std::unique_ptr<Value>(zextInst));
     return zextInst;

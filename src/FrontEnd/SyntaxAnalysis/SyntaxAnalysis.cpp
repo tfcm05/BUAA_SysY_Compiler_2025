@@ -234,10 +234,6 @@ BlockStmtPtr Parser::parseBlockStmt() {
     expect(LBRACE);
     
     while (!match(RBRACE)) {
-        if (match(SEMICN)) {
-            expect(SEMICN);
-            continue;
-        }
         if (match(STATICTK) || match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
             node->addBlockItem(parseVarDecl());
         } else {
@@ -252,9 +248,8 @@ BlockStmtPtr Parser::parseBlockStmt() {
 }
 
 ExpStmtPtr Parser::parseExpStmt() {
-    ExpStmtPtr node = nullptr;
-    if (!match(SEMICN)) {
-        node = std::make_unique<ExpStmt>(CURRENT_LINE);
+    ExpStmtPtr node = std::make_unique<ExpStmt>(CURRENT_LINE);
+    if (!match(SEMICN)) {      
         node->setExp(parseAssignExp());
     }
     expect(SEMICN);
