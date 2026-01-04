@@ -1,5 +1,0 @@
-; 声明
-declare i32 @getint()
-declare void @putint(i32)
-declare void @putstr(i8*)
-declare void @putchar(i8)
