@@ -8,17 +8,13 @@ void IRPrinter::printModule(const Module& module) const {
         return;
     }
 
-    // 将declaration.txt复制到ir.txt开头
-    std::ifstream declaration;
-    declaration.open("src/MiddleEnd/IntermediateCodeGenerate/declaration.txt");
-    if (!declaration.is_open()) {
-        std::cout << "Error: Unable to open declaration.txt for writing.\n";
-        return;
-    }
+    os << "; 声明\n";
+    os << "declare i32 @getint()\n";
+    os << "declare void @putint(i32)\n";
+    os << "declare void @putstr(i8*)\n";
+    os << "declare void @putchar(i8)\n";
+    os << "\n";
     
-    os << declaration.rdbuf();
-    os << "\n\n";
-    declaration.close();
 
     os << "; global variables -----------------\n";
     for (const auto* gv : module.getGlobalVariables()) {

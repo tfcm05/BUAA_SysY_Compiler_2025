@@ -30,8 +30,6 @@ public:
         CREATE_GLOBAL_VARIABLE, // 全局变量
 
         USE_LOCATION_VALUE, // 左值
-
-        SHORT_CIRCUIT_EVAL, // 短路求值
     };
 private:
     visitPurpose purpose;

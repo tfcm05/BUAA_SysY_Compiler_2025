@@ -323,8 +323,6 @@ InfoPtr IRVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr context) {
     auto symbol = node->getSymbol();
     if (!symbol) {
         std::cout << "Error: IdentifierExp has no associated symbol.\n";
-        std::cout << "Line: " << node->getStartLine() << std::endl;
-        std::cout << "Identifier: " << node->getIdentifier() << std::endl;
         return nullptr;
     }
 
@@ -521,8 +519,10 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
 
 InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
     std::vector<Value*> indices;
+    auto subscriptContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+    subscriptContext->setVisitPurpose(IRContext::DEFAULT);
     for (size_t i = 0; i < node->getSubscriptsCount(); ++i) {
-        auto indexInfo = std::dynamic_pointer_cast<IRInfo>(node->getSubscript(i)->accept(*this, context));
+        auto indexInfo = std::dynamic_pointer_cast<IRInfo>(node->getSubscript(i)->accept(*this, subscriptContext));
         auto index = indexInfo->getValue();
         indices.push_back(index);
     }
@@ -574,8 +574,7 @@ InfoPtr IRVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
         }
         case UnaryExp::UnaryOp::NOT: {
             auto boolValue = builder.createIcmp(IcmpInstr::IcmpOp::EQ, expValue, builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0));
-            auto intResult = builder.createZext(llvmContext.getIntegerTyImpl(32), boolValue);
-            return std::make_shared<IRInfo>(intResult);
+            return std::make_shared<IRInfo>(boolValue);
         }
         default:
             return nullptr;
@@ -609,7 +608,7 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
     };
 
     auto lhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getLhs()->accept(*this, context));
-    auto lhsValue = lhsInfo ? lhsInfo->getValue() : nullptr;
+    auto lhsValue = lhsInfo->getValue();
 
     switch (node->getBinaryOp()) {
         case BinaryExp::BinaryOp::AND: {
@@ -623,7 +622,7 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
             builder.setInsertPoint(rhsBlock);
             auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
-            auto rhsBool = ensureBoolean(rhsInfo ? rhsInfo->getValue() : nullptr);
+            auto rhsBool = ensureBoolean(rhsInfo->getValue());
             auto rhsEndBlock = builder.getInsertBlock();
             builder.createBr(mergeBlock);
 
@@ -645,7 +644,7 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
             builder.setInsertPoint(rhsBlock);
             auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
-            auto rhsBool = ensureBoolean(rhsInfo ? rhsInfo->getValue() : nullptr);
+            auto rhsBool = ensureBoolean(rhsInfo->getValue());
             auto rhsEndBlock = builder.getInsertBlock();
             builder.createBr(mergeBlock);
 
@@ -661,7 +660,13 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
     }
 
     auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
-    auto rhsValue = rhsInfo ? rhsInfo->getValue() : nullptr;
+    auto rhsValue = rhsInfo->getValue();
+
+    auto lhsType = lhsValue->getType();
+    auto rhsType = rhsValue->getType();
+    if (lhsType != rhsType) {
+        rhsValue = builder.createZext(lhsType, rhsValue);
+    }
 
     switch (node->getBinaryOp()) {
         case BinaryExp::BinaryOp::PLUS: {
@@ -729,6 +734,18 @@ InfoPtr IRVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
         return nullptr;
     }
 
+    auto lhsType = lhsValue->getType();
+    if (!lhsType->isPointer()) {
+        std::cout << "Error: LHS of assignment is not a pointer type.\n";
+        return nullptr;
+    }
+    auto lhsPointeeType = static_cast<LLVM::PointerType*>(lhsType)->getPointedType();
+
+    auto rhsType = rhsValue->getType();
+    if (lhsPointeeType != rhsType) {
+        rhsValue = builder.createZext(lhsPointeeType, rhsValue);
+    }
+
     builder.createStore(rhsValue, lhsValue);
     return std::make_shared<IRInfo>(rhsValue);
 }
@@ -742,7 +759,9 @@ InfoPtr IRVisitor::visitCommaExp(CommaExp* node, ContextPtr context) {
 }
 
 InfoPtr IRVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
-    node->getExp()->accept(*this, context);
+    if (node->getExp()) {
+        node->getExp()->accept(*this, context);
+    }
     return nullptr;
 }
 
@@ -788,9 +807,8 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
             return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
         };
 
-        auto condContext = context ? context->clone() : std::make_shared<IRContext>();
-        auto condInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, condContext));
-        auto condValue = ensureBoolean(condInfo ? condInfo->getValue() : nullptr);
+        auto condInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, context));
+        auto condValue = ensureBoolean(condInfo->getValue());
         builder.createBr(condValue, bodyBlock, exitBlock);
     } else {
         builder.createBr(bodyBlock);
@@ -845,9 +863,8 @@ InfoPtr IRVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
         return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
     };
 
-    auto condContext = context ? context->clone() : std::make_shared<IRContext>();
-    auto condInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, condContext));
-    auto condValue = ensureBoolean(condInfo ? condInfo->getValue() : nullptr);
+    auto condInfo = std::dynamic_pointer_cast<IRInfo>(node->getCondition()->accept(*this, context));
+    auto condValue = ensureBoolean(condInfo->getValue());
     builder.createBr(condValue, trueBlock, falseBlock ? falseBlock : mergeBlock);
 
     builder.setInsertPoint(trueBlock);
