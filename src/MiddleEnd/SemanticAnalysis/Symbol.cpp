@@ -1,7 +1,7 @@
 #include "../../../include/MiddleEnd/SemanticAnalysis/Symbol.h"
 
-Symbol::Symbol(std::string name, StorageClass storageClass, Clang::Type* type, SymbolKind kind)
-    : name(std::move(name)), storageClass(storageClass), type(type), kind(kind) {}
+Symbol::Symbol(std::string name, StorageClass storageClass, Clang::Type* type, SymbolKind kind, Clang::ConstValue* constValue)
+    : name(std::move(name)), storageClass(storageClass), type(type), kind(kind), constValue(constValue) {}
 
 const std::string& Symbol::getName() const { return name; }
 void Symbol::setName(const std::string& newName) { name = newName; }
@@ -15,6 +15,9 @@ bool Symbol::isStatic() const { return storageClass == StorageClass::STATIC; }
 
 Symbol::SymbolKind Symbol::getKind() const { return kind; }
 void Symbol::setKind(SymbolKind k) { kind = k; }
+
+Clang::ConstValue* Symbol::getConstValue() const { return constValue; }
+void Symbol::setConstValue(Clang::ConstValue* cv) { constValue = cv; }
 
 Value* Symbol::getValue() const { return value; }
 void Symbol::setValue(Value* v) { value = v; }

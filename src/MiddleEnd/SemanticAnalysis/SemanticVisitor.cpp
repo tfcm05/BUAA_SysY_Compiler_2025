@@ -12,8 +12,8 @@ void SemanticInfo::setType(Clang::Type* ty) { type = ty; }
 
 bool SemanticInfo::isLValue() const { return lValueFlag; }
 void SemanticInfo::setLValueFlag(bool lvf) { lValueFlag = lvf; }
-int64_t SemanticInfo::getConstValue() const { return constValue; }
-void SemanticInfo::setConstValue(int64_t cv) { constValue = cv; }
+Clang::ConstValue* SemanticInfo::getConstValue() const { return constValue; }
+void SemanticInfo::setConstValue(Clang::ConstValue* cv) { constValue = cv; }
 
 std::string SemanticInfo::getName() const { return name; }
 void SemanticInfo::setName(const std::string& n) { name = n; }
@@ -62,7 +62,7 @@ SemanticVisitor::SemanticVisitor(ClangContext& cc) : clangContext(cc), curScope(
             std::vector<Clang::Type*>{ clangContext.getQualifiedTyImpl(clangContext.getPointerTyImpl(clangContext.getCharTyImpl()), 1) },
             true
         );
-        auto printfSymbol = std::make_unique<Symbol>("printf", StorageClass::NONE, printfType, Symbol::FUNCTION);
+        auto printfSymbol = std::make_unique<Symbol>("printf", StorageClass::NONE, printfType, Symbol::FUNCTION, nullptr);
         curScope->addSymbol("printf", printfSymbol.get());
         buildInSymbols.push_back(std::move(printfSymbol));
     }
@@ -73,7 +73,7 @@ SemanticVisitor::SemanticVisitor(ClangContext& cc) : clangContext(cc), curScope(
             std::vector<Clang::Type*>{},
             false
         );
-        auto getintSymbol = std::make_unique<Symbol>("getint", StorageClass::NONE, getintType, Symbol::FUNCTION);
+        auto getintSymbol = std::make_unique<Symbol>("getint", StorageClass::NONE, getintType, Symbol::FUNCTION, nullptr);
         curScope->addSymbol("getint", getintSymbol.get());
         buildInSymbols.push_back(std::move(getintSymbol));
     }
@@ -136,7 +136,7 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
 
     for (size_t i = 0; i < node->getDeclaratorsCount(); ++i) {
         std::shared_ptr<SemanticInfo> varInfo;
-        if (sc == StorageClass::STATIC) {
+        if (sc == StorageClass::STATIC || node->getDeclSpec().isConst()) {
             auto staticContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
             staticContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
             varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, staticContext));
@@ -147,7 +147,7 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
         if (curScope->existInCurScope(varInfo->getName())) {
             errorLog(ErrorCode::b, node->getStartLine());
         } else {
-            auto symbol = createSymbol(varInfo->getName(), sc, varInfo->getType(), Symbol::VARIABLE);
+            auto symbol = createSymbol(varInfo->getName(), sc, varInfo->getType(), Symbol::VARIABLE, varInfo->getConstValue());
             // 将Symbol信息存储到Declarator中
             node->getDeclarator(i)->setSymbol(symbol);
         }
@@ -171,7 +171,7 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
     if (curScope->existInCurScope(funcInfo->getName())) {
         errorLog(ErrorCode::b, node->getStartLine());
     } else {
-        auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION);
+        auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
         // 将Symbol信息存储到Declarator中
         node->getDeclarator()->setSymbol(symbol);
     }
@@ -208,7 +208,7 @@ InfoPtr SemanticVisitor::visitParameterDecl(ParameterDecl* node, ContextPtr cont
         if (curScope->existInCurScope(paramInfo->getName())) {
             errorLog(ErrorCode::b, node->getStartLine());
         } else {
-            auto symbol = createSymbol(paramInfo->getName(), sc, paramInfo->getType(), Symbol::PARAMETER);
+            auto symbol = createSymbol(paramInfo->getName(), sc, paramInfo->getType(), Symbol::PARAMETER, nullptr);
             // 将Symbol信息存储到Declarator中
             node->getDeclarator()->setSymbol(symbol);
         }
@@ -244,12 +244,32 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
             } else {
                 // T arr[size];
                 auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
-                currentType = clangContext.getArrayTyImpl(currentType, constInfo->getConstValue());
+                auto constValue = constInfo->getConstValue();
+                if (!constValue || !constValue->isConstInteger()) {
+                    std::cout << "Error: Array size is not a constant integer, line: " << node->getStartLine() << std::endl;
+                    return nullptr;
+                }
+                auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
+                if (intValue <= 0) {
+                    std::cout << "Error: Array size must be positive, line: " << node->getStartLine() << std::endl;
+                    return nullptr;
+                }
+                currentType = clangContext.getArrayTyImpl(currentType, intValue);
             }
         } else {
             // 多维数组
             auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
-            currentType = clangContext.getArrayTyImpl(currentType, constInfo->getConstValue());
+            auto constValue = constInfo->getConstValue();
+            if (!constValue || !constValue->isConstInteger()) {
+                std::cout << "Error: Array size is not a constant integer, line: " << node->getStartLine() << std::endl;
+                return nullptr;
+            }
+            auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
+            if (intValue <= 0) {
+                std::cout << "Error: Array size must be positive, line: " << node->getStartLine() << std::endl;
+                return nullptr;
+            }
+            currentType = clangContext.getArrayTyImpl(currentType, intValue);
         }
     }
     auto arrayContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
@@ -278,9 +298,21 @@ InfoPtr SemanticVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr co
 }
 
 InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) {
-    auto info = node->getDeclarator()->accept(*this, context);
+    auto info = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, context));
 
-    node->getInitializer()->accept(*this, context);
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
+        auto initInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getInitializer()->accept(*this, context));
+        auto constValue = initInfo->getConstValue();
+        if (!constValue) {
+            std::cout << "Error: Initializer is not a constant value, line: " << node->getStartLine() << std::endl;
+            return nullptr;
+        }
+        info->setConstValue(constValue);
+    } else {
+        node->getInitializer()->accept(*this, context);
+    }
 
     return info;
 }
@@ -288,20 +320,56 @@ InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, Context
 InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr context) {
     auto expInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getExp()->accept(*this, context));
 
+    auto info = std::make_shared<SemanticInfo>();
+
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        node->setConstValue(expInfo->getConstValue());
+        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
+        
+        auto constValue = expInfo->getConstValue();
+        if (!constValue) {
+            node->setConstValue(0);
+            info->setConstValue(clangContext.getConstIntegerImpl(0));
+            return info;
+        }
+        if (!constValue->isConstInteger()) {
+            std::cout << "Error: Initializer expression is not a constant integer, line: " << node->getStartLine() << std::endl;
+            return nullptr;
+        }
+        auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
+        node->setConstValue(intValue);
+        info->setConstValue(clangContext.getConstIntegerImpl(intValue));
     }
 
-    return nullptr;
+    return info;
 }
 
 InfoPtr SemanticVisitor::visitListInitializer(ListInitializer* node, ContextPtr context) {
-    for (size_t i = 0; i < node->getInitializersCount(); ++i) {
-        node->getInitializer(i)->accept(*this, context);
+    auto info = std::make_shared<SemanticInfo>();
+
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
+
+        auto constArray = std::vector<Clang::ConstValue*>{};
+        for (size_t i = 0; i < node->getInitializersCount(); ++i) {
+            auto info = node->getInitializer(i)->accept(*this, context);
+            auto semanticInfo = std::dynamic_pointer_cast<SemanticInfo>(info);
+            auto constValue = semanticInfo->getConstValue();
+            if (!constValue) {
+                std::cout << "Error: Initializer is not a constant value, line: " << node->getStartLine() << std::endl;
+                return nullptr;
+            }
+            constArray.push_back(constValue);
+        }
+        info->setConstValue(clangContext.getConstArrayImpl(constArray));
+    } else {
+        for (size_t i = 0; i < node->getInitializersCount(); ++i) {
+            node->getInitializer(i)->accept(*this, context);
+        }
     }
 
-    return nullptr;
+    return info;
 }
 
 InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
@@ -315,7 +383,7 @@ InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
         auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
         if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
             info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
-            info->setConstValue(node->getNumberValue());
+            info->setConstValue(clangContext.getConstIntegerImpl(node->getNumberValue()));
         }
     } else if (node->getLiteralType() == LiteralExp::LiteralType::STRING) {
         // const char*
@@ -338,6 +406,12 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
     auto info = std::make_shared<SemanticInfo>();
     info->setType(symbol->getType());
     info->setLValueFlag(true);
+
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
+        info->setConstValue(symbol->getConstValue());
+    }
 
     return info;
 }
@@ -424,6 +498,42 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     info->setType(resultType);
     info->setLValueFlag(true);
 
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
+        
+        auto constValue = arrayInfo->getConstValue();
+        for (size_t i = 0; i < node->getSubscriptsCount(); ++i) {
+            if (!constValue) {
+                info->setConstValue(clangContext.getConstIntegerImpl(0));
+                return info;
+            }
+            if (!constValue->isConstArray()) {
+                std::cout << "Error: Subscripted array is not a constant array, line: " << node->getStartLine() << std::endl;
+                return nullptr;
+            }
+            auto constArray = static_cast<Clang::ConstArray*>(constValue);
+
+            auto subscriptInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getSubscript(i)->accept(*this, context));
+            auto subscriptConstValue = subscriptInfo->getConstValue();
+            if (!subscriptConstValue || !subscriptConstValue->isConstInteger()) {
+                std::cout << "Error: Subscript is not a constant integer, line: " << node->getStartLine() << std::endl;
+                return nullptr;
+            }
+            auto subscriptIntValue = static_cast<Clang::ConstInteger*>(subscriptConstValue)->getIntValue();
+            if (subscriptIntValue < 0 || static_cast<size_t>(subscriptIntValue) >= constArray->getElementsSize()) {
+                info->setConstValue(clangContext.getConstIntegerImpl(0));
+                return info;
+            }
+
+            constValue = constArray->getElement(subscriptIntValue);
+        }
+        if (!constValue) {
+            info->setConstValue(nullptr);
+        }
+        info->setConstValue(constValue);
+    }
+
     return info;
 }
 
@@ -438,21 +548,27 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
+        auto expConstValue = expInfo->getConstValue();
+        if (!expConstValue || !expConstValue->isConstInteger()) {
+            std::cout << "Error: Unary expression operand is not a constant integer, line: " << node->getStartLine() << std::endl;
+            return nullptr;
+        }
+        auto expIntValue = static_cast<Clang::ConstInteger*>(expConstValue)->getIntValue();
         int64_t constValue = 0;
         switch (node->getUnaryOp()) {
             case UnaryExp::UnaryOp::PLUS:
-                constValue = expInfo->getConstValue();
+                constValue = expIntValue;
                 break;
             case UnaryExp::UnaryOp::MINU:
-                constValue = -expInfo->getConstValue();
+                constValue = -expIntValue;
                 break;
             case UnaryExp::UnaryOp::NOT:
             default:
-                constValue = expInfo->getConstValue() == 0 ? 1 : 0;
+                constValue = expIntValue == 0 ? 1 : 0;
                 break;
         }
 
-        info->setConstValue(constValue);
+        info->setConstValue(clangContext.getConstIntegerImpl(constValue));
     }
 
     return info;
@@ -471,51 +587,61 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         int64_t constValue;
-        int64_t lhsConstValue = lhsInfo->getConstValue();
-        int64_t rhsConstValue = rhsInfo->getConstValue();
+        auto lhsConstValue = lhsInfo->getConstValue();
+        if (!lhsConstValue || !lhsConstValue->isConstInteger()) {
+            std::cout << "Error: Left operand of binary expression is not a constant integer, line: " << node->getStartLine() << std::endl;
+            return nullptr;
+        }
+        auto lhsIntValue = static_cast<Clang::ConstInteger*>(lhsConstValue)->getIntValue();
+        auto rhsConstValue = rhsInfo->getConstValue();
+        if (!rhsConstValue || !rhsConstValue->isConstInteger()) {
+            std::cout << "Error: Right operand of binary expression is not a constant integer, line: " << node->getStartLine() << std::endl;
+            return nullptr;
+        }
+        auto rhsIntValue = static_cast<Clang::ConstInteger*>(rhsConstValue)->getIntValue();
         switch (node->getBinaryOp()) {
             case BinaryExp::BinaryOp::PLUS:
-                constValue = lhsConstValue + rhsConstValue;
+                constValue = lhsIntValue + rhsIntValue;
                 break;
             case BinaryExp::BinaryOp::MINU:
-                constValue = lhsConstValue - rhsConstValue;
+                constValue = lhsIntValue - rhsIntValue;
                 break;
             case BinaryExp::BinaryOp::MULT:
-                constValue = lhsConstValue * rhsConstValue;
+                constValue = lhsIntValue * rhsIntValue;
                 break;
             case BinaryExp::BinaryOp::DIV:
-                constValue = lhsConstValue / rhsConstValue;
+                constValue = lhsIntValue / rhsIntValue;
                 break;
             case BinaryExp::BinaryOp::MOD:
-                constValue = lhsConstValue % rhsConstValue;
+                constValue = lhsIntValue % rhsIntValue;
                 break;
 
             case BinaryExp::BinaryOp::AND:
-                constValue = (lhsConstValue && rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue && rhsIntValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::OR:
-                constValue = (lhsConstValue || rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue || rhsIntValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::EQL:
-                constValue = (lhsConstValue == rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue == rhsIntValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::LEQ:
-                constValue = (lhsConstValue <= rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue <= rhsIntValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::GEQ:
-                constValue = (lhsConstValue >= rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue >= rhsIntValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::LSS:
-                constValue = (lhsConstValue < rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue < rhsIntValue) ? 1 : 0;
                 break;
             case BinaryExp::BinaryOp::GRE:
-                constValue = (lhsConstValue > rhsConstValue) ? 1 : 0;
+                constValue = (lhsIntValue > rhsIntValue) ? 1 : 0;
                 break;
             default:
                 std::cout << "Error: Unknown binary operator in constant expression evaluation, line: " << node->getStartLine() << std::endl;
                 return nullptr;
         }
-        info->setConstValue(constValue);
+        info->setConstValue(clangContext.getConstIntegerImpl(constValue));
     }
 
     return info;
@@ -682,8 +808,8 @@ bool SemanticVisitor::canAssign(Clang::Type* destType, Clang::Type* srcType) {
     return false;
 }
 
-Symbol* SemanticVisitor::createSymbol(const std::string& name, StorageClass sc, Clang::Type* type, Symbol::SymbolKind kind) {
-    auto symbol = std::make_unique<Symbol>(name, sc, type, kind);
+Symbol* SemanticVisitor::createSymbol(const std::string& name, StorageClass sc, Clang::Type* type, Symbol::SymbolKind kind, Clang::ConstValue* constValue) {
+    auto symbol = std::make_unique<Symbol>(name, sc, type, kind, constValue);
     auto result = symbol.get();
 
     symbolRecords[curScope->getScopeId()].push_back(std::move(symbol));

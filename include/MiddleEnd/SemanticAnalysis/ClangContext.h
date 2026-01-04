@@ -2,6 +2,7 @@
 #define CLANGCONTEXT_H
 
 #include "Type.h"
+#include "ConstValue.h"
 
 class ClangContext {
 private:
@@ -21,6 +22,9 @@ public:
     Clang::Type* getQualifiedTyImpl(Clang::Type* baseType, unsigned int qualifier);
 
     void scan(unsigned int mode);
+    
+    Clang::ConstInteger* getConstIntegerImpl(int64_t value);
+    Clang::ConstArray* getConstArrayImpl(const std::vector<Clang::ConstValue*>& elements);
 };
 
 #endif

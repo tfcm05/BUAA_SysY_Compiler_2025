@@ -665,7 +665,20 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
     auto lhsType = lhsValue->getType();
     auto rhsType = rhsValue->getType();
     if (lhsType != rhsType) {
-        rhsValue = builder.createZext(lhsType, rhsValue);
+        if (lhsType->isInteger() && rhsType->isInteger()) {
+            auto lhsIntType = static_cast<LLVM::IntegerType*>(lhsType);
+            auto rhsIntType = static_cast<LLVM::IntegerType*>(rhsType);
+            auto targetType = lhsIntType->getBitWidth() >= rhsIntType->getBitWidth() ? lhsType : rhsType;
+
+            if (lhsType != targetType) {
+                lhsValue = builder.createZext(targetType, lhsValue);
+            }
+            if (rhsType != targetType) {
+                rhsValue = builder.createZext(targetType, rhsValue);
+            }
+        } else {
+            rhsValue = builder.createZext(lhsType, rhsValue);
+        }
     }
 
     switch (node->getBinaryOp()) {

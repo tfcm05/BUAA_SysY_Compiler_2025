@@ -1,5 +1,6 @@
 #include "../../../include/MiddleEnd/SemanticAnalysis/ClangContext.h"
 #include "../../../include/MiddleEnd/SemanticAnalysis/Type.h"
+#include "../../../include/MiddleEnd/SemanticAnalysis/ConstValue.h"
 
 #include <unordered_map>
 #include <stdio.h>
@@ -39,6 +40,14 @@ public:
     
     // 使用 unique_ptr 的 vector 来自动管理所有动态分配的类型的内存
     std::vector<std::unique_ptr<Type>> ownedTypes;
+
+
+
+    // const 整数的缓存
+    std::unordered_map<int64_t, ConstInteger*> constIntegerValues;
+
+    // 使用 unique_ptr 来创建和缓存常量整数
+    std::vector<std::unique_ptr<ConstValue>> ownedConstValues;
 
     // 限定类型的辅助创建函数
     Type* createQualifiedType(Type* baseType, unsigned int qualifier) {
@@ -115,6 +124,26 @@ public:
             break;
         }
     }
+
+    ConstInteger* createConstInteger(ClangContext& context, int64_t value) {
+        auto it = constIntegerValues.find(value);
+        if (it != constIntegerValues.end()) {
+            return it->second;
+        }
+
+        auto newConstInt = std::unique_ptr<ConstInteger>(new ConstInteger(context, value));
+        ConstInteger* result = newConstInt.get();
+        ownedConstValues.push_back(std::move(newConstInt));
+        constIntegerValues[value] = result;
+        return result;
+    }
+
+    ConstArray* createConstArray(ClangContext& context, const std::vector<ConstValue*>& elements) {
+        auto newConstArray = std::unique_ptr<ConstArray>(new ConstArray(context, elements));
+        ConstArray* result = newConstArray.get();
+        ownedConstValues.push_back(std::move(newConstArray));
+        return result;
+    }
 };
 
 }
@@ -177,4 +206,12 @@ Clang::Type* ClangContext::getQualifiedTyImpl(Clang::Type* baseType, unsigned in
 
 void ClangContext::scan(unsigned int mode) {
     pImpl->scanTypes(mode);
+}
+
+Clang::ConstInteger* ClangContext::getConstIntegerImpl(int64_t value) {
+    return pImpl->createConstInteger(*this, value);
+}
+
+Clang::ConstArray* ClangContext::getConstArrayImpl(const std::vector<Clang::ConstValue*>& elements) {
+    return pImpl->createConstArray(*this, elements);
 }

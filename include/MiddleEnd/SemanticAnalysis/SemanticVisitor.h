@@ -5,6 +5,7 @@
 #include "../../Error.h"
 #include "SymbolTable.h"
 #include "ClangContext.h"
+#include "ConstValue.h"
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -23,8 +24,8 @@ private:
 
     // 表达式
     bool lValueFlag;
-        // 常量表达式的常量值
-        int64_t constValue;
+        // 常量
+        Clang::ConstValue* constValue;
 
     // 声明
     std::string name;
@@ -39,8 +40,8 @@ public:
 
     bool isLValue() const;
     void setLValueFlag(bool lvf);
-    int64_t getConstValue() const;
-    void setConstValue(int64_t cv);
+    Clang::ConstValue* getConstValue() const;
+    void setConstValue(Clang::ConstValue* cv);
 
     std::string getName() const;
     void setName(const std::string& n);
@@ -99,7 +100,7 @@ private:
 
     Clang::Type* convertToType(TypeSpecifier ts, unsigned int tq);
     bool canAssign(Clang::Type* destType, Clang::Type* srcType);
-    Symbol* createSymbol(const std::string& name, StorageClass sc, Clang::Type* type, Symbol::SymbolKind kind);
+    Symbol* createSymbol(const std::string& name, StorageClass sc, Clang::Type* type, Symbol::SymbolKind kind, Clang::ConstValue* constValue);
 public:
     SemanticVisitor(ClangContext& cc);
     ~SemanticVisitor() override;
