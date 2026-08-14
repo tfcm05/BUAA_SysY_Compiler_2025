@@ -87,6 +87,7 @@ SemanticVisitor::~SemanticVisitor() {
 
 InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
     // 全局变量需要计算初始化的常量表达式值
+    // (顺序保持先变量后函数: 函数体可引用全局变量; 全局初始化器若引用未声明函数, 由 visitIdentifierExp 报 c 错误)
     auto globalVarContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     globalVarContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
     for (size_t i = 0; i < node->getVarDeclsCount(); ++i) {
@@ -107,26 +108,52 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
 
     auto varType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
 
+    // 全局变量: visitCompUnit 传入的 context 为 EVALUATE_CONST
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    bool isGlobal = semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST;
+
     auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     varContext->setType(varType);
 
     for (size_t i = 0; i < node->getDeclaratorsCount(); ++i) {
-        std::shared_ptr<SemanticInfo> varInfo;
-        if (sc == StorageClass::STATIC || node->getDeclSpec().isConst()) {
-            auto staticContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
-            staticContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
-            varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, staticContext));
-        } else {
-            varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
-        }
+        // 是否有初始化器 (`int x;` 等裸声明符没有, 对应 C 的零初始化)
+        bool hasInit = dynamic_cast<InitialDeclarator*>(node->getDeclarator(i)) != nullptr;
 
-        if (!varInfo) {
-            // 声明失败（如数组尺寸非常量等），错误已记录，跳过该声明符
-            continue;
+        std::shared_ptr<SemanticInfo> varInfo;
+        if (isGlobal || sc == StorageClass::STATIC || node->getDeclSpec().isConst()) {
+            // 先做常量求值: 全局/static 变量的初始化器必须是常量表达式 (C 语义);
+            // const 变量也先尝试常量求值, 以保留 SysY 中 const 变量可用作数组尺寸等编译期常量的能力
+            auto constContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
+            constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
+            varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, constContext));
+
+            if (!varInfo) {
+                // 声明失败(如数组尺寸非常量), 错误已记录, 跳过该声明符
+                continue;
+            }
+
+            if (hasInit && !varInfo->getConstValue()) {
+                if (isGlobal || sc == StorageClass::STATIC) {
+                    // C 语义: 全局/static 对象必须用常量表达式初始化
+                    std::cout << "Error: Initializer of a global/static variable must be a constant expression, line: " << node->getStartLine() << std::endl;
+                    continue;
+                }
+                // 局部 const 变量可用非常量表达式初始化 (C 语义: const 是只读限定符, 不要求编译期常量)
+                varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
+                if (!varInfo) {
+                    continue;
+                }
+            }
+        } else {
+            // 局部普通变量: 普通求值
+            varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
+            if (!varInfo) {
+                continue;
+            }
         }
 
         if (curScope->existInCurScope(varInfo->getName())) {
-            errorLog(ErrorCode::b, node->getStartLine());
+            errorLog(ErrorCode::b, node->getStartLine(), varInfo->getName());
         } else {
             auto symbol = createSymbol(varInfo->getName(), sc, varInfo->getType(), Symbol::VARIABLE, varInfo->getConstValue());
             // 将Symbol信息存储到Declarator中
@@ -153,7 +180,7 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
    
     if (curScope->existInCurScope(funcInfo->getName())) {
-        errorLog(ErrorCode::b, node->getStartLine());
+        errorLog(ErrorCode::b, node->getStartLine(), funcInfo->getName());
     } else {
         auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
         // 将Symbol信息存储到Declarator中
@@ -195,7 +222,7 @@ InfoPtr SemanticVisitor::visitParameterDecl(ParameterDecl* node, ContextPtr cont
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::GENERATE_SYMBOL) {
         if (curScope->existInCurScope(paramInfo->getName())) {
-            errorLog(ErrorCode::b, node->getStartLine());
+            errorLog(ErrorCode::b, node->getStartLine(), paramInfo->getName());
         } else {
             auto symbol = createSymbol(paramInfo->getName(), sc, paramInfo->getType(), Symbol::PARAMETER, nullptr);
             // 将Symbol信息存储到Declarator中
@@ -313,12 +340,11 @@ InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, Context
         if (!initInfo) {
             return nullptr;
         }
+        // 非常量初始化器: info 不带 constValue 返回, 由 visitVariableDecl 决定报错(全局/static)或回退普通求值(局部 const)
         auto constValue = initInfo->getConstValue();
-        if (!constValue) {
-            std::cout << "Error: Initializer is not a constant value, line: " << node->getStartLine() << std::endl;
-            return nullptr;
+        if (constValue) {
+            info->setConstValue(constValue);
         }
-        info->setConstValue(constValue);
     } else {
         node->getInitializer()->accept(*this, context);
     }
@@ -339,14 +365,9 @@ InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr co
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
         
         auto constValue = expInfo->getConstValue();
-        if (!constValue) {
-            node->setConstValue(0);
-            info->setConstValue(clangContext.getConstIntegerImpl(0));
+        if (!constValue || !constValue->isConstInteger()) {
+            // 非常量初始化表达式: 不报错也不静默归零, 交由上层决定 (全局/static 报错, 局部回退普通求值)
             return info;
-        }
-        if (!constValue->isConstInteger()) {
-            std::cout << "Error: Initializer expression is not a constant integer, line: " << node->getStartLine() << std::endl;
-            return nullptr;
         }
         auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
         node->setConstValue(intValue);
@@ -365,15 +386,14 @@ InfoPtr SemanticVisitor::visitListInitializer(ListInitializer* node, ContextPtr 
 
         auto constArray = std::vector<Clang::ConstValue*>{};
         for (size_t i = 0; i < node->getInitializersCount(); ++i) {
-            auto info = node->getInitializer(i)->accept(*this, context);
-            auto semanticInfo = std::dynamic_pointer_cast<SemanticInfo>(info);
-            if (!semanticInfo) {
+            auto childInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getInitializer(i)->accept(*this, context));
+            if (!childInfo) {
                 return nullptr;
             }
-            auto constValue = semanticInfo->getConstValue();
+            auto constValue = childInfo->getConstValue();
             if (!constValue) {
-                std::cout << "Error: Initializer is not a constant value, line: " << node->getStartLine() << std::endl;
-                return nullptr;
+                // 数组初始化器中含非常量元素: 整个列表不是常量, 交由上层决定
+                return info;
             }
             constArray.push_back(constValue);
         }
@@ -412,7 +432,7 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
     auto symbol = curScope->lookup(node->getIdentifier());
 
     if (!symbol) {
-        errorLog(ErrorCode::c, node->getStartLine());
+        errorLog(ErrorCode::c, node->getStartLine(), node->getIdentifier());
         return nullptr;
     }
     // 将Symbol信息存储到AstNode中
@@ -455,7 +475,11 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     } 
 
     if (node->getArgumentsCount() != funcType->getParamTypesCount()) {
-        errorLog(ErrorCode::d, node->getStartLine());
+        std::string funcName;
+        if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
+            funcName = idExp->getIdentifier();
+        }
+        errorLog(ErrorCode::d, node->getStartLine(), funcName);
         return nullptr;
     } else {
         for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
@@ -467,7 +491,11 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
                
             auto paramType = funcType->getParamType(i);
             if (!canAssign(paramType, argType)) {
-                errorLog(ErrorCode::e, node->getStartLine());
+                std::string funcName;
+                if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
+                    funcName = idExp->getIdentifier();
+                }
+                errorLog(ErrorCode::e, node->getStartLine(), funcName);
                 return nullptr;
             }
         }
@@ -561,8 +589,8 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
 
         auto expConstValue = expInfo->getConstValue();
         if (!expConstValue || !expConstValue->isConstInteger()) {
-            std::cout << "Error: Unary expression operand is not a constant integer, line: " << node->getStartLine() << std::endl;
-            return nullptr;
+            // 非常量操作数: 不报错, 仅表示该表达式不是常量 (由上层决定报错或回退普通求值)
+            return info;
         }
         auto expIntValue = static_cast<Clang::ConstInteger*>(expConstValue)->getIntValue();
         int64_t constValue = 0;
@@ -604,19 +632,18 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         }
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
-        int64_t constValue;
         auto lhsConstValue = lhsInfo->getConstValue();
         if (!lhsConstValue || !lhsConstValue->isConstInteger()) {
-            std::cout << "Error: Left operand of binary expression is not a constant integer, line: " << node->getStartLine() << std::endl;
-            return nullptr;
+            // 非常量操作数: 不报错, 仅表示该表达式不是常量 (由上层决定报错或回退普通求值)
+            return info;
         }
         auto lhsIntValue = static_cast<Clang::ConstInteger*>(lhsConstValue)->getIntValue();
         auto rhsConstValue = rhsInfo->getConstValue();
         if (!rhsConstValue || !rhsConstValue->isConstInteger()) {
-            std::cout << "Error: Right operand of binary expression is not a constant integer, line: " << node->getStartLine() << std::endl;
-            return nullptr;
+            return info;
         }
         auto rhsIntValue = static_cast<Clang::ConstInteger*>(rhsConstValue)->getIntValue();
+        int64_t constValue;
         switch (node->getBinaryOp()) {
             case BinaryExp::BinaryOp::PLUS:
                 constValue = lhsIntValue + rhsIntValue;
@@ -680,7 +707,11 @@ InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
         return nullptr;
     }
     if (lhsType->isConst()) {
-        errorLog(ErrorCode::h, node->getStartLine());
+        std::string name;
+        if (auto idExp = dynamic_cast<IdentifierExp*>(node->getLhs())) {
+            name = idExp->getIdentifier();
+        }
+        errorLog(ErrorCode::h, node->getStartLine(), name);
         return nullptr;
     }
 

@@ -202,7 +202,7 @@ FunctionDeclPtr Parser::parseFuncDecl() {
     functionDecl->setDeclarator(parseDeclarator());
 
     if (match(SEMICN)) {
-        // 函数声明 (无函数体), 如 int getint(); 链接时由运行库提供实现
+        // 函数声明 (无函数体), 链接时由运行库提供实现
         expect(SEMICN);
     } else {
         functionDecl->setBody(parseBlockStmt());

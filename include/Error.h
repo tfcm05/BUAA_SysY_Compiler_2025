@@ -16,7 +16,7 @@ typedef enum {
     m, // break or continue outside of loop
 } ErrorCode;
 
-void errorLog(ErrorCode errorCode, int line);
+void errorLog(ErrorCode errorCode, int line, const std::string& msg = "");
 
 std::string errorCodeToString(ErrorCode code);
 

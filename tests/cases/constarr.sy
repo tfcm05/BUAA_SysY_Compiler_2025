@@ -1,0 +1,7 @@
+const int A = 2 + 3 * 4;
+const int arr[A] = {1, 2, 3};
+void putint(int a);
+int main() {
+    putint(arr[1]);
+    return 0;
+}

@@ -9,13 +9,14 @@ namespace {
     struct ErrorInfo {
         int line;
         ErrorCode code;
+        std::string msg;
     };
 
     std::vector<ErrorInfo> errorList;
 }
 
-void errorLog(ErrorCode errorCode, int line) {
-    errorList.push_back({line, errorCode});
+void errorLog(ErrorCode errorCode, int line, const std::string& msg) {
+    errorList.push_back({line, errorCode, msg});
 }
 
 int getErrorCount() {
@@ -52,7 +53,11 @@ void dumpErrorsToFile() {
         return;
     }
     for (const auto& err : errorList) {
-        errorFile << err.line << " " << errorCodeToString(err.code) << std::endl;
+        errorFile << err.line << " " << errorCodeToString(err.code);
+        if (!err.msg.empty()) {
+            errorFile << " '" << err.msg << "'";
+        }
+        errorFile << std::endl;
     }
     errorFile.close();
 }

@@ -1,0 +1,7 @@
+int foo() { return 42; }
+void putint(int a);
+int main() {
+    const int x = foo();
+    putint(x);
+    return 0;
+}

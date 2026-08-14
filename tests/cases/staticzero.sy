@@ -1,0 +1,6 @@
+void putint(int a);
+int main() {
+    static int x;
+    putint(x);
+    return 0;
+}
