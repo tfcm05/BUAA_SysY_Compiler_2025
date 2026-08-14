@@ -177,11 +177,9 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
         auto declarator = node->getDeclarator(i);
         auto symbol = declarator->getSymbol();
         if (!symbol) {
-            std::cout << "Error: Missing symbol for variable declarator.\n";
             continue;
         }
         if (symbol->getKind() != Symbol::VARIABLE) {
-            std::cout << "Error: Symbol is not of variable kind.\n";
             continue;
         }
         auto llvmType = convertType(symbol->getType());
@@ -234,11 +232,9 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
 InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
     auto funcSymbol = node->getDeclarator()->getSymbol();
     if (!funcSymbol) {
-        std::cout << "Error: Missing symbol for function declaration.\n";
         return nullptr;
     }
     if (funcSymbol->getKind() != Symbol::FUNCTION) {
-        std::cout << "Error: Symbol is not of function kind.\n";
         return nullptr;
     }
     auto llvmFuncType = convertType(funcSymbol->getType());
@@ -261,11 +257,9 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
             auto paramDecl = funcDeclarator->getParameter(i);
             auto paramSymbol = paramDecl->getDeclarator()->getSymbol();
             if (!paramSymbol) {
-                std::cout << "Error: Missing symbol for function parameter.\n";
                 continue;
             }
             if (paramSymbol->getKind() != Symbol::PARAMETER) {
-                std::cout << "Error: Symbol is not of parameter kind.\n";
                 continue;
             }
             auto arg = builder.createArgument(convertType(paramSymbol->getType()));
@@ -323,7 +317,6 @@ InfoPtr IRVisitor::visitListInitializer(ListInitializer* node, ContextPtr contex
         arrayType = static_cast<LLVM::ArrayType*>(type);
         arraySize = arrayType->getSize();
     } else {
-        std::cout << "Error: ListInitializer used for non-array type in global variable initialization.\n";
         return nullptr;
     }
     if (irContext->getVisitPurpose() == IRContext::CREATE_GLOBAL_VARIABLE) {
@@ -338,7 +331,6 @@ InfoPtr IRVisitor::visitListInitializer(ListInitializer* node, ContextPtr contex
             }
             auto constValue = dynamic_cast<Constant*>(initializerInfo->getValue());
             if (!constValue) {
-                std::cout << "Error: Non-constant initializer in global variable initialization.\n";
                 return nullptr;
             }
             flattenConstArray(constValue, scalars);
@@ -366,14 +358,12 @@ InfoPtr IRVisitor::visitListInitializer(ListInitializer* node, ContextPtr contex
 InfoPtr IRVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr context) {
     auto symbol = node->getSymbol();
     if (!symbol) {
-        std::cout << "Error: IdentifierExp has no associated symbol.\n";
         return nullptr;
     }
 
     auto value = symbol->getValue();
     if (!value) {
         // 不再内置任何函数(printf/getint/putint/putstr 均需用户在 SysY 中声明)
-        std::cout << "Error: Symbol has no associated value for IR generation.\n";
         return nullptr;
     }
 
@@ -439,12 +429,10 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
     }
     auto value = functionIRInfo->getValue();
     if (!value) {
-        std::cout << "Error: FunctionCallExp has no associated value.\n";
         return nullptr;
     }
     auto function = dynamic_cast<Function*>(value);
     if (!function) {
-        std::cout << "Error: FunctionCallExp refers to a non-function value.\n";
         return nullptr;
     }
 
@@ -489,7 +477,6 @@ InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
         }
         auto ptr = arrayIRInfo->getValue();
         if (!ptr) {
-            std::cout << "Error: SubscriptExp array has no associated value.\n";
             return nullptr;
         }
         auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
@@ -515,7 +502,6 @@ InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
         }
         auto ptr = arrayIRInfo->getValue();
         if (!ptr) {
-            std::cout << "Error: SubscriptExp array has no associated value.\n";
             return nullptr;
         }
         auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
@@ -567,7 +553,6 @@ InfoPtr IRVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
 InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
     auto ensureBoolean = [&](Value* value) -> Value* {
         if (!value) {
-            std::cout << "Error: Null value encountered during boolean coercion.\n";
             return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
         }
         if (auto constInt = dynamic_cast<ConstantInt*>(value)) {
@@ -586,7 +571,6 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
             return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
         }
-        std::cout << "Error: Unsupported value type for boolean coercion.\n";
         return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
     };
 
@@ -745,20 +729,17 @@ InfoPtr IRVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
 
     auto rhsIRInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
     if (!lhsIRInfo || !rhsIRInfo) {
-        std::cout << "Error: Invalid LHS or RHS in assignment expression.\n";
         return nullptr;
     }
 
     auto lhsValue = lhsIRInfo->getValue();
     auto rhsValue = rhsIRInfo->getValue();
     if (!lhsValue || !rhsValue) {
-        std::cout << "Error: Invalid LHS or RHS in assignment expression.\n";
         return nullptr;
     }
 
     auto lhsType = lhsValue->getType();
     if (!lhsType->isPointer()) {
-        std::cout << "Error: LHS of assignment is not a pointer type.\n";
         return nullptr;
     }
     auto lhsPointeeType = static_cast<LLVM::PointerType*>(lhsType)->getPointedType();
@@ -810,7 +791,6 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     if (node->getCondition()) {
         auto ensureBoolean = [&](Value* value) -> Value* {
             if (!value) {
-                std::cout << "Error: Null for-loop condition value.\n";
                 return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
             }
             if (auto constInt = dynamic_cast<ConstantInt*>(value)) {
@@ -829,7 +809,6 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
                 auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
                 return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
             }
-            std::cout << "Error: Unsupported for-loop condition type.\n";
             return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
         };
 
@@ -880,7 +859,6 @@ InfoPtr IRVisitor::visitWhileStmt(WhileStmt* node, ContextPtr context) {
     builder.setInsertPoint(condBlock);
     auto ensureBoolean = [&](Value* value) -> Value* {
         if (!value) {
-            std::cout << "Error: Null while-condition value.\n";
             return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
         }
         if (auto constInt = dynamic_cast<ConstantInt*>(value)) {
@@ -899,7 +877,6 @@ InfoPtr IRVisitor::visitWhileStmt(WhileStmt* node, ContextPtr context) {
             auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
             return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
         }
-        std::cout << "Error: Unsupported while-condition type.\n";
         return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
     };
 
@@ -957,7 +934,6 @@ InfoPtr IRVisitor::visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) {
     builder.setInsertPoint(condBlock);
     auto ensureBoolean = [&](Value* value) -> Value* {
         if (!value) {
-            std::cout << "Error: Null do-while-condition value.\n";
             return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
         }
         if (auto constInt = dynamic_cast<ConstantInt*>(value)) {
@@ -976,7 +952,6 @@ InfoPtr IRVisitor::visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) {
             auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
             return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
         }
-        std::cout << "Error: Unsupported do-while-condition type.\n";
         return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
     };
 
@@ -1007,7 +982,6 @@ InfoPtr IRVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
     builder.setInsertPoint(entryBlock);
     auto ensureBoolean = [&](Value* value) -> Value* {
         if (!value) {
-            std::cout << "Error: Null if-condition value.\n";
             return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
         }
         auto valueType = value->getType();
@@ -1019,7 +993,6 @@ InfoPtr IRVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
             auto zero = builder.createConstInt(llvmContext.getIntegerTyImpl(integerType->getBitWidth()), 0);
             return builder.createIcmp(IcmpInstr::IcmpOp::NE, value, zero);
         }
-        std::cout << "Error: Unsupported if-condition type.\n";
         return builder.createConstInt(llvmContext.getIntegerTyImpl(1), 0);
     };
 
@@ -1064,7 +1037,6 @@ InfoPtr IRVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
     auto breakContext = std::dynamic_pointer_cast<IRContext>(context);
     auto breakTarget = dynamic_cast<BasicBlock*>(breakContext->getValue(1));
     if (!breakTarget) {
-        std::cout << "Error: break outside loop\n";
         return nullptr;
     }
     builder.createBr(breakTarget);
@@ -1076,7 +1048,6 @@ InfoPtr IRVisitor::visitContinueStmt(ContinueStmt* node, ContextPtr context) {
     auto continueContext = std::dynamic_pointer_cast<IRContext>(context);
     auto continueTarget = dynamic_cast<BasicBlock*>(continueContext->getValue(0));
     if (!continueTarget) {
-        std::cout << "Error: continue outside loop\n";
         return nullptr;
     }
     builder.createBr(continueTarget);

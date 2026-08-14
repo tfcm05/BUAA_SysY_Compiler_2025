@@ -13,41 +13,36 @@ namespace {
     };
 
     std::vector<ErrorInfo> errorList;
-    int nonStandardErrorCount = 0;  // 非标准错误计数 (不写入 error.txt, 仅阻止 IR gen)
 }
 
 void errorLog(ErrorCode errorCode, int line, const std::string& msg) {
     errorList.push_back({line, errorCode, msg});
 }
 
-void incrementErrorCount() {
-    // 不写入 error.txt (无标准错误码), 但递增错误计数以阻止 IR 生成
-    nonStandardErrorCount++;
-}
-
-void semanticError(int line, const std::string& message) {
-    std::cout << "Error: " << message << ", line: " << line << std::endl;
-    incrementErrorCount();
-}
-
 int getErrorCount() {
-    return (int)errorList.size() + nonStandardErrorCount;
+    return (int)errorList.size();
 }
 
 std::string errorCodeToString(ErrorCode code) {
     switch (code) {
-    case IllegalChar: return "非法字符";
-    case RedefinedName: return "名字重定义";
-    case UndefinedName: return "未定义的名字";
-    case ParamCountMismatch: return "函数参数个数不匹配";
-    case ParamTypeMismatch: return "函数参数类型不匹配";
-    case ReturnTypeMismatch: return "return语句与函数返回类型不匹配";
-    case MissingReturn: return "有返回值的函数缺少return语句";
-    case ConstAssignment: return "不能改变常量的值";
-    case MissingSemicolon: return "缺少分号";
-    case MissingRightParen: return "缺少右小括号";
-    case MissingRightBracket: return "缺少右中括号";
-    case PrintfFormatMismatch: return "printf中格式字符与表达式个数不匹配";
+    case IllegalChar:               return "非法字符";
+    case MissingSemicolon:          return "缺少分号";
+    case MissingRightParen:         return "缺少右小括号";
+    case MissingRightBracket:       return "缺少右中括号";
+    case RedefinedName:             return "名字重定义";
+    case UndefinedName:             return "未定义的名字";
+    case ParamCountMismatch:        return "函数参数个数不匹配";
+    case ParamTypeMismatch:         return "函数参数类型不匹配";
+    case CallNonFunction:           return "对非函数类型进行调用";
+    case ReturnTypeMismatch:        return "return语句与函数返回类型不匹配";
+    case MissingReturn:             return "有返回值的函数缺少return语句";
+    case ConstAssignment:           return "不能改变常量的值";
+    case GlobalStaticNonConstInit:  return "全局或静态变量初始化必须为常量表达式";
+    case ConstDivByZero:            return "常量表达式除以零";
+    case ArraySizeNotConst:         return "数组大小不是常量";
+    case ArraySizeNotPositive:      return "数组大小必须为正";
+    case SubscriptNonArray:         return "对非数组或非指针类型使用下标";
+    case AssignmentToNonLValue:     return "赋值左侧不是左值";
     case BreakContinueOutsideLoop: return "非循环块中使用break和continue语句";
     default: return "未知错误";
     }
@@ -60,7 +55,6 @@ void dumpErrorsToFile() {
 
     std::ofstream errorFile("error.txt");
     if (!errorFile.is_open()) {
-        std::cout << "Error: Could not open error.txt for writing." << std::endl;
         return;
     }
     for (const auto& err : errorList) {

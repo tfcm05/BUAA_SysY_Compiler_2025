@@ -125,6 +125,7 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
         if (isStaticStorage || isConstVar) {
             auto constContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
             constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
+            int errCountBefore = getErrorCount();
             varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, constContext));
 
             if (!varInfo) {
@@ -133,7 +134,10 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
 
             if (hasInit && !varInfo->getConstValue()) {
                 if (isStaticStorage) {
-                    semanticError(node->getStartLine(), "Initializer of a global/static variable must be a constant expression");
+                    // 仅当初始化器本身无错误时才报 (避免与未定义名字等重复报错)
+                    if (getErrorCount() == errCountBefore) {
+                        errorLog(ErrorCode::GlobalStaticNonConstInit, node->getStartLine());
+                    }
                     continue;
                 }
                 // 局部 const: 回退普通求值
@@ -276,12 +280,12 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
                 }
                 auto constValue = constInfo->getConstValue();
                 if (!constValue || !constValue->isConstInteger()) {
-                    semanticError(node->getStartLine(), "Array size is not a constant integer");
+                    errorLog(ErrorCode::ArraySizeNotConst, node->getStartLine());
                     return nullptr;
                 }
                 auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
                 if (intValue <= 0) {
-                    semanticError(node->getStartLine(), "Array size must be positive");
+                    errorLog(ErrorCode::ArraySizeNotPositive, node->getStartLine());
                     return nullptr;
                 }
                 currentType = clangContext.getArrayTyImpl(currentType, intValue);
@@ -299,12 +303,12 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
             }
             auto constValue = constInfo->getConstValue();
             if (!constValue || !constValue->isConstInteger()) {
-                semanticError(node->getStartLine(), "Array size is not a constant integer");
+                errorLog(ErrorCode::ArraySizeNotConst, node->getStartLine());
                 return nullptr;
             }
             auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
             if (intValue <= 0) {
-                semanticError(node->getStartLine(), "Array size must be positive");
+                errorLog(ErrorCode::ArraySizeNotPositive, node->getStartLine());
                 return nullptr;
             }
             currentType = clangContext.getArrayTyImpl(currentType, intValue);
@@ -463,10 +467,14 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
         // 语法错误恢复后可能产生空子节点
         return nullptr;
     }
+    int errCountBefore = getErrorCount();
     auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getFunction()->accept(*this, context));
     
     if (!funcInfo || !funcInfo->getType() || !funcInfo->getType()->isFunctionTy()) {
-        semanticError(node->getStartLine(), "Calling a non-function type");
+        // 仅当函数表达式本身无错误时才报 (避免与未定义名字重复报错)
+        if (getErrorCount() == errCountBefore) {
+            errorLog(ErrorCode::CallNonFunction, node->getStartLine());
+        }
         return nullptr;
     }
     auto funcType = static_cast<Clang::FunctionType*>(funcInfo->getType());
@@ -546,7 +554,7 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     }
     auto arrayInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArray()->accept(*this, context));
     if (!arrayInfo || !arrayInfo->getType() || (!arrayInfo->getType()->isArrayTy() && !arrayInfo->getType()->isPointerTy())) {
-        semanticError(node->getStartLine(), "Subscript operator applied to non-array and non-pointer type");
+        errorLog(ErrorCode::SubscriptNonArray, node->getStartLine());
         return nullptr;
     }
     
@@ -582,8 +590,7 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
                 return info;
             }
             if (!constValue->isConstArray()) {
-                semanticError(node->getStartLine(), "Subscripted array is not a constant array");
-                return nullptr;
+                return info;
             }
             auto constArray = static_cast<Clang::ConstArray*>(constValue);
 
@@ -701,7 +708,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
         // 编译期可检出的除零/模零 (C 语义: 除零为 UB, 编译器报错而非崩溃)
         if ((node->getBinaryOp() == BinaryExp::BinaryOp::DIV || node->getBinaryOp() == BinaryExp::BinaryOp::MOD) && rhsIntValue == 0) {
-            semanticError(node->getStartLine(), "Division by zero in constant expression");
+            errorLog(ErrorCode::ConstDivByZero, node->getStartLine());
             return nullptr;
         }
 
@@ -748,8 +755,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
                 constValue = (lhsIntValue > rhsIntValue) ? 1 : 0;
                 break;
             default:
-                semanticError(node->getStartLine(), "Unknown binary operator in constant expression evaluation");
-                return nullptr;
+                return info;
         }
         info->setConstValue(clangContext.getConstIntegerImpl(constValue));
     } else {
@@ -771,7 +777,7 @@ InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
     }
     auto lhsType = lhsInfo->getType();
     if (!lhsInfo->isLValue()) {
-        semanticError(node->getStartLine(), "Left-hand side of assignment is not an l-value");
+        errorLog(ErrorCode::AssignmentToNonLValue, node->getStartLine());
         return nullptr;
     }
     if (lhsType->isConst()) {

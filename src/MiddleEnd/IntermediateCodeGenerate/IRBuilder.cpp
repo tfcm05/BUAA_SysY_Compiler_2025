@@ -92,7 +92,6 @@ Function* IRBuilder::createFunction(LLVM::Type* funcType, const std::string& nam
     }else if (mode == 1) { // declaration
         // 不做任何操作
     } else {
-        std::cout << "Error: Unknown function creation mode.\n";
         return nullptr;
     }
     ownedValue.push_back(std::unique_ptr<Value>(func));
@@ -102,7 +101,6 @@ Function* IRBuilder::createFunction(LLVM::Type* funcType, const std::string& nam
 // Argument
 Argument* IRBuilder::createArgument(LLVM::Type* type) {
     if (!currentFunction) {
-        std::cout << "Error: No current function when creating argument.\n";
         return nullptr;
     }
     auto name = currentFunction->getName() + ".arg" + std::to_string(currentFunction->getArgumentsCount());
@@ -116,7 +114,6 @@ Argument* IRBuilder::createArgument(LLVM::Type* type) {
 // null
 BasicBlock* IRBuilder::createBasicBlock() {
     if (!currentFunction) {
-        std::cout << "Error: No current function when creating basic block.\n";
         return nullptr;
     }
     auto name = ensureName(currentFunction->getName(), "bb");
@@ -132,7 +129,6 @@ BasicBlock* IRBuilder::createBasicBlock() {
 // address
 AllocaInst* IRBuilder::createAlloca(LLVM::Type* type) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating alloca instruction.\n";
         return nullptr;
     }
     auto allocaInst = new AllocaInst(llvmContext.getPointerTyImpl(type), ensureName(currentBlock->getName(), "alloca"));
@@ -146,11 +142,9 @@ AllocaInst* IRBuilder::createAlloca(LLVM::Type* type) {
 // value
 LoadInst* IRBuilder::createLoad(Value* ptr) {
     if (!ptr->getType() || !ptr->getType()->isPointer()) {
-        std::cout << "Error: Attempting to load from a non-pointer type.\n";
         return nullptr;
     }
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating load instruction.\n";
         return nullptr;
     }
     auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
@@ -165,11 +159,9 @@ LoadInst* IRBuilder::createLoad(Value* ptr) {
 // null
 StoreInst* IRBuilder::createStore(Value* val, Value* ptr) {
     if (!ptr->getType() || !ptr->getType()->isPointer()) {
-        std::cout << "Error: Attempting to store to a non-pointer type.\n";
         return nullptr;
     }
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating store instruction.\n";
         return nullptr;
     }
     auto storeInst = new StoreInst(val, ptr, ensureName(currentBlock->getName(), "store"));
@@ -183,7 +175,6 @@ StoreInst* IRBuilder::createStore(Value* val, Value* ptr) {
 // null
 RetInstr* IRBuilder::createRet(Value* val) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating ret instruction.\n";
         return nullptr;
     }
     auto retInst = new RetInstr(val, ensureName(currentBlock->getName(), "ret"));
@@ -197,7 +188,6 @@ RetInstr* IRBuilder::createRet(Value* val) {
 // value
 AddInstr* IRBuilder::createAdd(Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating add instruction.\n";
         return nullptr;
     }
     auto addInst = new AddInstr(llvmContext.getIntegerTyImpl(32), lhs, rhs, ensureName(currentBlock->getName(), "add"));
@@ -208,7 +198,6 @@ AddInstr* IRBuilder::createAdd(Value* lhs, Value* rhs) {
 }
 SubInstr* IRBuilder::createSub(Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating sub instruction.\n";
         return nullptr;
     }
     auto subInst = new SubInstr(llvmContext.getIntegerTyImpl(32), lhs, rhs, ensureName(currentBlock->getName(), "sub"));
@@ -219,7 +208,6 @@ SubInstr* IRBuilder::createSub(Value* lhs, Value* rhs) {
 }
 MulInstr* IRBuilder::createMul(Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating mul instruction.\n";
         return nullptr;
     }
     auto mulInst = new MulInstr(llvmContext.getIntegerTyImpl(32), lhs, rhs, ensureName(currentBlock->getName(), "mul"));
@@ -230,7 +218,6 @@ MulInstr* IRBuilder::createMul(Value* lhs, Value* rhs) {
 }
 SdivInstr* IRBuilder::createSdiv(Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating sdiv instruction.\n";
         return nullptr;
     }
     auto sdivInst = new SdivInstr(llvmContext.getIntegerTyImpl(32), lhs, rhs, ensureName(currentBlock->getName(), "sdiv"));
@@ -242,7 +229,6 @@ SdivInstr* IRBuilder::createSdiv(Value* lhs, Value* rhs) {
 
 AndInstr* IRBuilder::createAnd(Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating and instruction.\n";
         return nullptr;
     }
     auto andInst = new AndInstr(llvmContext.getIntegerTyImpl(1), lhs, rhs, ensureName(currentBlock->getName(), "and"));
@@ -253,7 +239,6 @@ AndInstr* IRBuilder::createAnd(Value* lhs, Value* rhs) {
 }
 OrInstr* IRBuilder::createOr(Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating or instruction.\n";
         return nullptr;
     }
     auto orInst = new OrInstr(llvmContext.getIntegerTyImpl(1), lhs, rhs, ensureName(currentBlock->getName(), "or"));
@@ -267,7 +252,6 @@ OrInstr* IRBuilder::createOr(Value* lhs, Value* rhs) {
 // value
 IcmpInstr* IRBuilder::createIcmp(IcmpInstr::IcmpOp op, Value* lhs, Value* rhs) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating icmp instruction.\n";
         return nullptr;
     }
     auto icmpInst = new IcmpInstr(op, llvmContext.getIntegerTyImpl(1), lhs, rhs, ensureName(currentBlock->getName(), "icmp"));
@@ -281,7 +265,6 @@ IcmpInstr* IRBuilder::createIcmp(IcmpInstr::IcmpOp op, Value* lhs, Value* rhs) {
 // null
 BrInstr* IRBuilder::createBr(Value* cond, BasicBlock* trueBB, BasicBlock* falseBB) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating br instruction.\n";
         return nullptr;
     }
     auto brInst = new BrInstr(cond, trueBB, falseBB, ensureName(currentBlock->getName(), "br"));
@@ -294,7 +277,6 @@ BrInstr* IRBuilder::createBr(Value* cond, BasicBlock* trueBB, BasicBlock* falseB
 // null
 BrInstr* IRBuilder::createBr(BasicBlock* target) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating br instruction.\n";
         return nullptr;
     }
     auto brInst = new BrInstr(nullptr, target, nullptr, ensureName(currentBlock->getName(), "br"));
@@ -308,7 +290,6 @@ BrInstr* IRBuilder::createBr(BasicBlock* target) {
 // value
 PhiInstr* IRBuilder::createPhi(LLVM::Type* type, std::vector<std::pair<Value*, BasicBlock*>> incomings) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating phi instruction.\n";
         return nullptr;
     }
     auto phiInst = new PhiInstr(type, std::move(incomings), ensureName(currentBlock->getName(), "phi"));
@@ -322,13 +303,11 @@ PhiInstr* IRBuilder::createPhi(LLVM::Type* type, std::vector<std::pair<Value*, B
 // address
 GetElementPtrInst* IRBuilder::createGEP(Value* ptr, std::vector<Value*> indices) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating getelementptr instruction.\n";
         return nullptr;
     }
     auto type = ptr->getType();
     for (size_t i = 0; i < indices.size(); ++i) {
         if (!type->isPointer() && !type->isArray()) {
-            std::cout << "Error: Attempting to get pointer from a non-pointer and non-array type";
             return nullptr;
         }
         type = type->isPointer() ? static_cast<LLVM::PointerType*>(type)->getPointedType()
@@ -345,11 +324,9 @@ GetElementPtrInst* IRBuilder::createGEP(Value* ptr, std::vector<Value*> indices)
 // value
 CallInstr* IRBuilder::createCall(Function* func, std::vector<Value*> args) {
     if (!func->getType() || !func->getType()->isFunction()) {
-        std::cout << "Error: Attempting to call a non-function type.\n";
         return nullptr;
     }
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating call instruction.\n";
         return nullptr;
     }
     auto funcType = static_cast<LLVM::FunctionType*>(func->getType());
@@ -363,7 +340,6 @@ CallInstr* IRBuilder::createCall(Function* func, std::vector<Value*> args) {
 
 ZextInstr* IRBuilder::createZext(LLVM::Type* type, Value* operand) {
     if (!currentBlock) {
-        std::cout << "Error: No current basic block when creating zext instruction." << std::endl;
         return nullptr;
     }
     auto zextInst = new ZextInstr(type, operand, ensureName(currentBlock->getName(), "zext"));

@@ -74,10 +74,6 @@ void Parser::expect(TokenType expect) {
     if (!match(expect)) {
         // 错误处理
         
-        std::cout << "Error: Expected token " << getTypeCode(expect)
-                  << " but found token " << getTypeCode(CURRENT_TYPE)
-                  << " at line " << CURRENT_LINE << std::endl;
-        
         if (expect == SEMICN) {
             errorLog(ErrorCode::MissingSemicolon, preLine);
         } else if (expect == RPARENT) {
@@ -91,8 +87,6 @@ void Parser::expect(TokenType expect) {
             advance();
         }
     } else {
-        std::cout << "Matched token: " << getTypeCode(CURRENT_TYPE)
-                  << " with value \"" << CURRENT_VALUE << "\" at line " << CURRENT_LINE << std::endl;
         advance();
     }
 }

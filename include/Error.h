@@ -3,30 +3,50 @@
 
 #include <string>
 
+// 错误码按编译阶段分类
+//   词法: IllegalChar
+//   语法: MissingSemicolon / MissingRightParen / MissingRightBracket
+//   语义: 声明与作用域 / 函数调用 / 返回语句 / 常量与初始化 / 数组 / 赋值 / 控制流
 typedef enum {
-    IllegalChar,               // a: 非法字符
-    RedefinedName,             // b: 名字重定义
-    UndefinedName,             // c: 未定义的名字
-    ParamCountMismatch,        // d: 函数参数个数不匹配
-    ParamTypeMismatch,         // e: 函数参数类型不匹配
-    ReturnTypeMismatch,        // f: return 语句与函数返回类型不匹配
-    MissingReturn,             // g: 有返回值的函数缺少 return 语句
-    ConstAssignment,           // h: 不能改变常量的值
-    MissingSemicolon,          // i: 缺少分号
-    MissingRightParen,         // j: 缺少右小括号
-    MissingRightBracket,       // k: 缺少右中括号
-    PrintfFormatMismatch,      // l: printf 格式不匹配 (已无调用, 保留)
-    BreakContinueOutsideLoop,  // m: 非循环块中使用 break/continue
+    // ===== 词法错误 =====
+    IllegalChar,                // 非法字符
+
+    // ===== 语法错误 =====
+    MissingSemicolon,           // 缺少分号
+    MissingRightParen,         // 缺少右小括号
+    MissingRightBracket,       // 缺少右中括号
+
+    // ===== 语义错误: 声明与作用域 =====
+    RedefinedName,             // 名字重定义
+    UndefinedName,             // 未定义的名字
+
+    // ===== 语义错误: 函数调用 =====
+    ParamCountMismatch,        // 函数参数个数不匹配
+    ParamTypeMismatch,         // 函数参数类型不匹配
+    CallNonFunction,           // 对非函数类型进行调用
+
+    // ===== 语义错误: 返回语句 =====
+    ReturnTypeMismatch,        // return语句与函数返回类型不匹配
+    MissingReturn,             // 有返回值的函数缺少return语句
+
+    // ===== 语义错误: 常量与初始化 =====
+    ConstAssignment,           // 不能改变常量的值
+    GlobalStaticNonConstInit,  // 全局/static变量初始化必须为常量表达式
+    ConstDivByZero,            // 常量表达式除以零
+
+    // ===== 语义错误: 数组 =====
+    ArraySizeNotConst,         // 数组大小不是常量
+    ArraySizeNotPositive,      // 数组大小必须为正
+    SubscriptNonArray,         // 对非数组/非指针类型使用下标
+
+    // ===== 语义错误: 赋值 =====
+    AssignmentToNonLValue,     // 赋值左侧不是左值
+
+    // ===== 语义错误: 控制流 =====
+    BreakContinueOutsideLoop,  // 非循环块中使用break/continue
 } ErrorCode;
 
 void errorLog(ErrorCode errorCode, int line, const std::string& msg = "");
-
-// 统一语义错误报告: 输出到 stdout + 递增错误计数 (阻止 IR 生成)
-// 用于无标准 SysY 错误码的语义错误 (全局/static 初始化器非常量、编译期除零等)
-void semanticError(int line, const std::string& message);
-
-// 仅递增错误计数, 不输出 (配合自定义错误输出使用)
-void incrementErrorCount();
 
 std::string errorCodeToString(ErrorCode code);
 

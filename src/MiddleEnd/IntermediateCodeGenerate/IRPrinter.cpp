@@ -4,7 +4,6 @@ void IRPrinter::printModule(const Module& module) const {
     std::ofstream os;
     os.open("llvm_ir.txt");
     if (!os.is_open()) {
-        std::cout << "Error: Unable to open llvm_ir.txt for writing.\n";
         return;
     }
 

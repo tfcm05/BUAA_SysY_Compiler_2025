@@ -6,6 +6,7 @@
 
 #include "include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "include/MiddleEnd/Optimization/AlgebraicSimplification.h"
 
 int main() {
     std::ifstream file("testfile.txt"); // 打开文件
@@ -51,6 +52,11 @@ int main() {
     IRVisitor irVisitor(module, builder, llvmContext);
     root->accept(irVisitor, std::make_shared<IRContext>());
     std::cout << "\n--- Intermediate Code Generation Finished ---\n" << std::endl;
+
+    std::cout << "--- Algebraic Simplification ---\n" << std::endl;
+    AlgebraicSimplification algSim(module, llvmContext);
+    int nSim = algSim.run();
+    std::cout << "AlgebraicSimplification: " << nSim << " simplifications\n" << std::endl;
     
     return 0;
 }
