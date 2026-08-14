@@ -12,7 +12,7 @@ void IRPrinter::printModule(const Module& module) const {
     os << "declare i32 @getint()\n";
     os << "declare void @putint(i32)\n";
     os << "declare void @putstr(i8*)\n";
-    os << "declare void @putchar(i8)\n";
+    os << "declare void @putchar(i32)\n";
     os << "\n";
     
 

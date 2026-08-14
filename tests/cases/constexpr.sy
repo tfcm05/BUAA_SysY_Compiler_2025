@@ -1,0 +1,6 @@
+const int A = 2 + 3 * 4;
+const int B = A % 5;
+int main() {
+    printf("A=%d B=%d\n", A, B);
+    return 0;
+}

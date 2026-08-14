@@ -1,0 +1,58 @@
+--- Starting Lexical & Syntax Analysis ---
+
+Matched token: VOIDTK with value "void" at line 1
+Matched token: IDENFR with value "show" at line 1
+Matched token: LPARENT with value "(" at line 1
+Matched token: INTTK with value "int" at line 1
+Matched token: IDENFR with value "x" at line 1
+Matched token: RPARENT with value ")" at line 1
+Matched token: LBRACE with value "{" at line 1
+Matched token: IDENFR with value "printf" at line 2
+Matched token: LPARENT with value "(" at line 2
+Matched token: STRCON with value "x=%d\n" at line 2
+Matched token: COMMA with value "," at line 2
+Matched token: IDENFR with value "x" at line 2
+Matched token: RPARENT with value ")" at line 2
+Matched token: SEMICN with value ";" at line 2
+Matched token: RETURNTK with value "return" at line 3
+Matched token: SEMICN with value ";" at line 3
+Matched token: RBRACE with value "}" at line 4
+Matched token: INTTK with value "int" at line 5
+Matched token: MAINTK with value "main" at line 5
+Matched token: LPARENT with value "(" at line 5
+Matched token: RPARENT with value ")" at line 5
+Matched token: LBRACE with value "{" at line 5
+Matched token: IDENFR with value "show" at line 6
+Matched token: LPARENT with value "(" at line 6
+Matched token: INTCON with value "42" at line 6
+Matched token: RPARENT with value ")" at line 6
+Matched token: SEMICN with value ";" at line 6
+Matched token: RETURNTK with value "return" at line 7
+Matched token: INTCON with value "0" at line 7
+Matched token: SEMICN with value ";" at line 7
+Matched token: RBRACE with value "}" at line 8
+
+--- Lexical & Syntax Analysis Finished ---
+
+...
+
+..
+
+.
+
+--- Starting Semantic Analysis ---
+
+
+--- Semantic Analysis Finished ---
+
+...
+
+..
+
+.
+
+--- Starting Intermediate Code Generation ---
+
+
+--- Intermediate Code Generation Finished ---
+

@@ -1,6 +1,7 @@
 #ifndef CONST_INT_H
 #define CONST_INT_H
 
+#include <cstdint>
 #include "Constant.h"
 
 #include <string>

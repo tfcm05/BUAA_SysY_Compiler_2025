@@ -1,6 +1,7 @@
 #ifndef CLANGCONTEXT_H
 #define CLANGCONTEXT_H
 
+#include <cstdint>
 #include "Type.h"
 #include "ConstValue.h"
 

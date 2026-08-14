@@ -1,0 +1,6 @@
+int main() {
+    int a = getint();
+    int b = getint();
+    printf("sum=%d\n", a + b);
+    return 0;
+}

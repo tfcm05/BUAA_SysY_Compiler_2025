@@ -1,6 +1,7 @@
 #ifndef CONSTVALUE_H
 #define CONSTVALUE_H
 
+#include <cstdint>
 #include <vector>
 #include <memory>
 

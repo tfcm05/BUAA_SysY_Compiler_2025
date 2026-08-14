@@ -1,5 +1,6 @@
 #ifndef PRIMARYEXP_H
 #define PRIMARYEXP_H
+#include <cstdint>
 #include "Expression.h"
 
 /*

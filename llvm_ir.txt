@@ -1,0 +1,30 @@
+; 声明
+declare i32 @getint()
+declare void @putint(i32)
+declare void @putstr(i8*)
+declare void @putchar(i32)
+
+; global variables -----------------
+; global constant strings --------
+@Global.Variable.1 = private unnamed_addr constant [3 x i8] c"x=\00"
+@Global.Variable.2 = private unnamed_addr constant [2 x i8] c"\0A\00"
+
+; functions -----------------------
+define dso_local void @show(i32 %show.arg0) {
+show.entry:
+  %show.entry.gep.1 = getelementptr [3 x i8], [3 x i8]* @Global.Variable.1, i32 0, i32 0
+  call void @putstr(i8* %show.entry.gep.1)
+  call void @putint(i32 %show.arg0)
+  %show.entry.gep.2 = getelementptr [2 x i8], [2 x i8]* @Global.Variable.2, i32 0, i32 0
+  call void @putstr(i8* %show.entry.gep.2)
+  ret void
+}
+
+
+; main function -------------------
+define dso_local i32 @main() {
+main.entry:
+  call void @show(i32 42)
+  ret i32 0
+}
+

@@ -1,0 +1,8 @@
+void show(int x) {
+    printf("x=%d\n", x);
+    return;
+}
+int main() {
+    show(42);
+    return 0;
+}

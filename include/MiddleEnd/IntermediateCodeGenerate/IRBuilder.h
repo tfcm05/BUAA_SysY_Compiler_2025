@@ -9,6 +9,7 @@
 #include <string>
 #include <iostream>
 #include <unordered_map>
+#include <cstdint>
 
 class IRBuilder {
 private:

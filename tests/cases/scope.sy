@@ -1,0 +1,9 @@
+int main() {
+    int a = 1;
+    {
+        int a = 2;
+        printf("inner=%d\n", a);
+    }
+    printf("outer=%d\n", a);
+    return 0;
+}

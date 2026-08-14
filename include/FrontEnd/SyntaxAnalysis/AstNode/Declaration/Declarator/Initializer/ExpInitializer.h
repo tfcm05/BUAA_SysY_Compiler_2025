@@ -1,5 +1,6 @@
 #ifndef EXPINITIALIZER_H
 #define EXPINITIALIZER_H
+#include <cstdint>
 #include "Initializer.h"
 #include "../../../Expression/Expression.h"
 
