@@ -144,6 +144,11 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
             varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
         }
 
+        if (!varInfo) {
+            // 声明失败（如数组尺寸非常量等），错误已记录，跳过该声明符
+            continue;
+        }
+
         if (curScope->existInCurScope(varInfo->getName())) {
             errorLog(ErrorCode::b, node->getStartLine());
         } else {
@@ -165,6 +170,9 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
     auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     funcContext->setType(retType);
     auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, funcContext));
+    if (!funcInfo) {
+        return nullptr;
+    }
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
    
@@ -202,6 +210,9 @@ InfoPtr SemanticVisitor::visitParameterDecl(ParameterDecl* node, ContextPtr cont
     paramContext->setType(paramType);
     paramContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
     auto paramInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, paramContext));
+    if (!paramInfo) {
+        return nullptr;
+    }
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::GENERATE_SYMBOL) {
@@ -244,6 +255,9 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
             } else {
                 // T arr[size];
                 auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
+                if (!constInfo) {
+                    return nullptr;
+                }
                 auto constValue = constInfo->getConstValue();
                 if (!constValue || !constValue->isConstInteger()) {
                     std::cout << "Error: Array size is not a constant integer, line: " << node->getStartLine() << std::endl;
@@ -258,7 +272,15 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
             }
         } else {
             // 多维数组
+            if (node->getArraySize(i - 1) == nullptr) {
+                // 多维数组最外层尺寸缺省(如 int a[][3]) -> 退化为指针 T (*)[..]
+                currentType = clangContext.getPointerTyImpl(currentType);
+                continue;
+            }
             auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
+            if (!constInfo) {
+                return nullptr;
+            }
             auto constValue = constInfo->getConstValue();
             if (!constValue || !constValue->isConstInteger()) {
                 std::cout << "Error: Array size is not a constant integer, line: " << node->getStartLine() << std::endl;
@@ -286,6 +308,9 @@ InfoPtr SemanticVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr co
     std::vector<Clang::Type*> paramTypes;
     for (size_t i = 0; i < node->getParametersCount(); ++i) {
         auto paramInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getParameter(i)->accept(*this, context));
+        if (!paramInfo) {
+            return nullptr;
+        }
         paramTypes.push_back(paramInfo->getType());
     }
     currentType = clangContext.getFunctionTyImpl(currentType, paramTypes, false);
@@ -299,11 +324,17 @@ InfoPtr SemanticVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr co
 
 InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) {
     auto info = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, context));
+    if (!info) {
+        return nullptr;
+    }
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
         auto initInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getInitializer()->accept(*this, context));
+        if (!initInfo) {
+            return nullptr;
+        }
         auto constValue = initInfo->getConstValue();
         if (!constValue) {
             std::cout << "Error: Initializer is not a constant value, line: " << node->getStartLine() << std::endl;
@@ -319,6 +350,9 @@ InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, Context
 
 InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr context) {
     auto expInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getExp()->accept(*this, context));
+    if (!expInfo) {
+        return nullptr;
+    }
 
     auto info = std::make_shared<SemanticInfo>();
 
@@ -355,6 +389,9 @@ InfoPtr SemanticVisitor::visitListInitializer(ListInitializer* node, ContextPtr 
         for (size_t i = 0; i < node->getInitializersCount(); ++i) {
             auto info = node->getInitializer(i)->accept(*this, context);
             auto semanticInfo = std::dynamic_pointer_cast<SemanticInfo>(info);
+            if (!semanticInfo) {
+                return nullptr;
+            }
             auto constValue = semanticInfo->getConstValue();
             if (!constValue) {
                 std::cout << "Error: Initializer is not a constant value, line: " << node->getStartLine() << std::endl;
@@ -417,9 +454,13 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
 }
 
 InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr context) {
+    if (!node->getFunction()) {
+        // 语法错误恢复后可能产生空子节点
+        return nullptr;
+    }
     auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getFunction()->accept(*this, context));
     
-    if (!funcInfo->getType() || !funcInfo->getType()->isFunctionTy()) {
+    if (!funcInfo || !funcInfo->getType() || !funcInfo->getType()->isFunctionTy()) {
         std::cout << "Error: Calling a non-function type, line: " << node->getStartLine() << std::endl;
         return nullptr;
     }
@@ -463,6 +504,9 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     } else {
         for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
             auto argInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArgument(i)->accept(*this, context));
+            if (!argInfo) {
+                return nullptr;
+            }
             auto argType = argInfo->getType();
                
             auto paramType = funcType->getParamType(i);
@@ -477,8 +521,12 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
 }
 
 InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
+    if (!node->getArray()) {
+        // 语法错误恢复后可能产生空子节点
+        return nullptr;
+    }
     auto arrayInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArray()->accept(*this, context));
-    if (!arrayInfo->getType() || (!arrayInfo->getType()->isArrayTy() && !arrayInfo->getType()->isPointerTy())) {
+    if (!arrayInfo || !arrayInfo->getType() || (!arrayInfo->getType()->isArrayTy() && !arrayInfo->getType()->isPointerTy())) {
         std::cout << "Error: Subscript operator applied to non-array and non-pointer type, line: " << node->getStartLine() << std::endl;
         return nullptr;
     }
@@ -538,7 +586,14 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
 }
 
 InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
+    if (!node->getExp()) {
+        // 语法错误恢复后可能产生空子节点
+        return nullptr;
+    }
     auto expInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getExp()->accept(*this, context));
+    if (!expInfo) {
+        return nullptr;
+    }
 
     auto info = std::make_shared<SemanticInfo>();
     info->setType(expInfo->getType());
@@ -575,6 +630,10 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
+    if (!node->getLhs() || !node->getRhs()) {
+        // 语法错误恢复后可能产生空子节点
+        return nullptr;
+    }
     auto lhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getLhs()->accept(*this, context));
     auto rhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getRhs()->accept(*this, context));
 
@@ -584,6 +643,9 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+        if (!lhsInfo || !rhsInfo) {
+            return nullptr;
+        }
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         int64_t constValue;
@@ -648,7 +710,14 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
+    if (!node->getLhs() || !node->getRhs()) {
+        // 语法错误恢复后可能产生空子节点
+        return nullptr;
+    }
     auto lhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getLhs()->accept(*this, context));
+    if (!lhsInfo) {
+        return nullptr;
+    }
     auto lhsType = lhsInfo->getType();
     if (!lhsInfo->isLValue()) {
         std::cout << "Error: Left-hand side of assignment is not an l-value, line: " << node->getStartLine() << std::endl;
@@ -666,6 +735,9 @@ InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
 
 InfoPtr SemanticVisitor::visitCommaExp(CommaExp* node, ContextPtr context) {
     for (size_t i = 0; i < node->getExpsCount(); ++i) {
+        if (!node->getExp(i)) {
+            continue;
+        }
         node->getExp(i)->accept(*this, context);
     }
 
@@ -681,7 +753,11 @@ InfoPtr SemanticVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
-    if (node->getInitial()) {
+    // for 头声明的变量作用域覆盖整个 for 语句 (C/SysY 语义)
+    ScopeGuard guard(curScope);
+    if (node->hasInitialDecl()) {
+        node->getInitialDecl()->accept(*this, context);
+    } else if (node->getInitial()) {
         node->getInitial()->accept(*this, context);
     }
     if (node->getCondition()) {
@@ -698,9 +774,37 @@ InfoPtr SemanticVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     return nullptr;
 }
 
+InfoPtr SemanticVisitor::visitWhileStmt(WhileStmt* node, ContextPtr context) {
+    if (node->getCondition()) {
+        node->getCondition()->accept(*this, context);
+    }
+
+    auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    cloneContext->setLoopFlag(true);
+    node->getBody()->accept(*this, cloneContext);
+
+    return nullptr;
+}
+
+InfoPtr SemanticVisitor::visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) {
+    if (node->getCondition()) {
+        node->getCondition()->accept(*this, context);
+    }
+
+    auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    cloneContext->setLoopFlag(true);
+    node->getBody()->accept(*this, cloneContext);
+
+    return nullptr;
+}
+
 InfoPtr SemanticVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
-    node->getCondition()->accept(*this, context);
-    node->getTrueStmt()->accept(*this, context);
+    if (node->getCondition()) {
+        node->getCondition()->accept(*this, context);
+    }
+    if (node->getTrueStmt()) {
+        node->getTrueStmt()->accept(*this, context);
+    }
     if (node->getFalseStmt()) {
         node->getFalseStmt()->accept(*this, context);
     }

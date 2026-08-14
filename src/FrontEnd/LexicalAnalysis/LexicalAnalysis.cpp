@@ -11,6 +11,8 @@ std::unordered_map<std::string, TokenType> keywords = {
     {"if", IFTK},
     {"else", ELSETK},
     {"for", FORTK},
+    {"while", WHILETK},
+    {"do", DOTK},
     {"break", BREAKTK},
     {"continue", CONTINUETK},
     {"return", RETURNTK},

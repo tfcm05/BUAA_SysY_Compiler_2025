@@ -40,6 +40,19 @@ void ForStmt::setInitial(ExpPtr s) {
     initial = std::move(s);
 }
 
+bool ForStmt::hasInitialDecl() const {
+    return initialDecl != nullptr;
+}
+VariableDecl* ForStmt::getInitialDecl() const {
+    return initialDecl.get();
+}
+VariableDeclPtr ForStmt::releaseInitialDecl() {
+    return std::move(initialDecl);
+}
+void ForStmt::setInitialDecl(VariableDeclPtr d) {
+    initialDecl = std::move(d);
+}
+
 Exp* ForStmt::getCondition() const {
     return condition.get();
 }
@@ -72,6 +85,62 @@ void ForStmt::setBody(StmtPtr s) {
 
 InfoPtr ForStmt::accept(AstVisitor& visitor, ContextPtr context) {
     return visitor.visitForStmt(this, context);
+}
+
+// WhileStmt
+WhileStmt::WhileStmt(size_t sl)
+    : Stmt(sl) {}
+
+Exp* WhileStmt::getCondition() const {
+    return condition.get();
+}
+ExpPtr WhileStmt::releaseCondition() {
+    return std::move(condition);
+}
+void WhileStmt::setCondition(ExpPtr cond) {
+    condition = std::move(cond);
+}
+
+Stmt* WhileStmt::getBody() const {
+    return stmt.get();
+}
+StmtPtr WhileStmt::releaseBody() {
+    return std::move(stmt);
+}
+void WhileStmt::setBody(StmtPtr s) {
+    stmt = std::move(s);
+}
+
+InfoPtr WhileStmt::accept(AstVisitor& visitor, ContextPtr context) {
+    return visitor.visitWhileStmt(this, context);
+}
+
+// DoWhileStmt
+DoWhileStmt::DoWhileStmt(size_t sl)
+    : Stmt(sl) {}
+
+Exp* DoWhileStmt::getCondition() const {
+    return condition.get();
+}
+ExpPtr DoWhileStmt::releaseCondition() {
+    return std::move(condition);
+}
+void DoWhileStmt::setCondition(ExpPtr cond) {
+    condition = std::move(cond);
+}
+
+Stmt* DoWhileStmt::getBody() const {
+    return stmt.get();
+}
+StmtPtr DoWhileStmt::releaseBody() {
+    return std::move(stmt);
+}
+void DoWhileStmt::setBody(StmtPtr s) {
+    stmt = std::move(s);
+}
+
+InfoPtr DoWhileStmt::accept(AstVisitor& visitor, ContextPtr context) {
+    return visitor.visitDoWhileStmt(this, context);
 }
 
 // ----- Selection Statements -----

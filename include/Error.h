@@ -18,4 +18,6 @@ void errorLog(ErrorCode errorCode, int line);
 
 void dumpErrorsToFile();
 
+int getErrorCount();
+
 #endif

@@ -18,6 +18,10 @@ void errorLog(ErrorCode errorCode, int line) {
     errorList.push_back({line, errorCode});
 }
 
+int getErrorCount() {
+    return (int)errorList.size();
+}
+
 void dumpErrorsToFile() {
     std::sort(errorList.begin(), errorList.end(), [](const ErrorInfo& a, const ErrorInfo& b) {
         return a.line < b.line;

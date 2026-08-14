@@ -34,6 +34,11 @@ int main() {
     
     dumpErrorsToFile();
 
+    if (getErrorCount() > 0) {
+        std::cout << "\n--- Semantic errors found (" << getErrorCount() << "), skipping IR generation ---\n" << std::endl;
+        return 0;
+    }
+
     std::cout << "...\n" << std::endl;
     std::cout << "..\n" << std::endl;
     std::cout << ".\n" << std::endl;

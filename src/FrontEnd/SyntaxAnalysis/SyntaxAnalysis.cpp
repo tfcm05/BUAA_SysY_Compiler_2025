@@ -84,6 +84,11 @@ void Parser::expect(TokenType expect) {
         } else if (expect == RBRACK) {
             errorLog(ErrorCode::k, preLine);
         }
+
+        // 失败时也推进一个 token (文件末尾除外), 防止语法错误导致无限循环
+        if (CURRENT_TYPE != END) {
+            advance();
+        }
     } else {
         std::cout << "Matched token: " << getTypeCode(CURRENT_TYPE)
                   << " with value \"" << CURRENT_VALUE << "\" at line " << CURRENT_LINE << std::endl;
@@ -122,11 +127,13 @@ DeclaratorPtr Parser::parseDeclarator() {
     }
     
     if (match(LBRACK)) {
-        // 数组 (一维数组)
+        // 数组 (支持多维)
         std::vector<ExpPtr> arraySizeList;
-        expect(LBRACK);
-        arraySizeList.push_back(parseAddExp());
-        expect(RBRACK);
+        while (match(LBRACK)) {
+            expect(LBRACK);
+            arraySizeList.push_back(parseLOrExp());
+            expect(RBRACK);
+        }
         declarator = std::make_unique<ArrayDeclarator>(std::move(declarator), std::move(arraySizeList), startLine);
     } else if (match(LPARENT)) {
         // 函数
@@ -166,7 +173,7 @@ InitializerPtr Parser::parseInitializer() {
         expect(RBRACE);
         return listInit;
     } else {
-        auto expInit = std::make_unique<ExpInitializer>(parseAddExp(), startLine);
+        auto expInit = std::make_unique<ExpInitializer>(parseLOrExp(), startLine);
         return expInit;
     }
 }
@@ -220,7 +227,8 @@ FunctionDeclPtr Parser::parseMainFuncDecl() {
     expect(MAINTK);
     expect(LPARENT);
     expect(RPARENT);
-    auto mainDeclarator = std::make_unique<FuncDeclarator>(std::move(identDeclarator), std::vector<ParameterDeclPtr>{}, identDeclarator->getStartLine());
+    size_t mainDeclLine = identDeclarator->getStartLine();
+    auto mainDeclarator = std::make_unique<FuncDeclarator>(std::move(identDeclarator), std::vector<ParameterDeclPtr>{}, mainDeclLine);
     mainFuncDecl->setDeclarator(std::move(mainDeclarator));
 
     mainFuncDecl->setBody(parseBlockStmt());
@@ -234,6 +242,10 @@ BlockStmtPtr Parser::parseBlockStmt() {
     expect(LBRACE);
     
     while (!match(RBRACE)) {
+        if (match(END)) {
+            // 语法错误: 块未闭合, 直接终止避免死循环
+            break;
+        }
         if (match(STATICTK) || match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
             node->addBlockItem(parseVarDecl());
         } else {
@@ -251,6 +263,10 @@ ExpStmtPtr Parser::parseExpStmt() {
     ExpStmtPtr node = std::make_unique<ExpStmt>(CURRENT_LINE);
     if (!match(SEMICN)) {      
         node->setExp(parseAssignExp());
+        if (!node->getExp() && !match(SEMICN)) {
+            // 表达式解析失败且未停在分号: 强制推进一个 token, 防止死循环
+            advance();
+        }
     }
     expect(SEMICN);
     return node;
@@ -277,10 +293,19 @@ ForStmtPtr Parser::parseForStmt() {
 
     expect(FORTK);
     expect(LPARENT);
+    bool declInit = false;
     if (!match(SEMICN)) {
-        node->setInitial(parseCommaExp());
+        // for(int i = 0; cond; step) 形式的初始化声明 (SysY 文法 InitStmt 可为声明)
+        if (match(INTTK) || match(CONSTTK) || match(STATICTK)) {
+            node->setInitialDecl(parseVarDecl()); // parseVarDecl 内部消费 ';'
+            declInit = true;
+        } else {
+            node->setInitial(parseCommaExp());
+        }
     }
-    expect(SEMICN);
+    if (!declInit) {
+        expect(SEMICN);
+    }
     if (!match(SEMICN)) {
         node->setCondition(parseLOrExp());
     } 
@@ -290,6 +315,32 @@ ForStmtPtr Parser::parseForStmt() {
     }
     expect(RPARENT);
     node->setBody(parseStmt());
+
+    return node;
+}
+
+WhileStmtPtr Parser::parseWhileStmt() {
+    auto node = std::make_unique<WhileStmt>(CURRENT_LINE);
+
+    expect(WHILETK);
+    expect(LPARENT);
+    node->setCondition(parseLOrExp());
+    expect(RPARENT);
+    node->setBody(parseStmt());
+
+    return node;
+}
+
+DoWhileStmtPtr Parser::parseDoWhileStmt() {
+    auto node = std::make_unique<DoWhileStmt>(CURRENT_LINE);
+
+    expect(DOTK);
+    node->setBody(parseStmt());
+    expect(WHILETK);
+    expect(LPARENT);
+    node->setCondition(parseLOrExp());
+    expect(RPARENT);
+    expect(SEMICN);
 
     return node;
 }
@@ -317,7 +368,7 @@ ReturnStmtPtr Parser::parseReturnStmt() {
 
     expect(RETURNTK);
     if (!match(SEMICN)) {
-        node->setReturnExp(parseAddExp());
+        node->setReturnExp(parseLOrExp());
     }
     expect(SEMICN);
     
@@ -331,6 +382,10 @@ StmtPtr Parser::parseStmt() {
         return parseIfStmt();
     } else if (match(FORTK)) {
         return parseForStmt();
+    } else if (match(WHILETK)) {
+        return parseWhileStmt();
+    } else if (match(DOTK)) {
+        return parseDoWhileStmt();
     } else if (match(BREAKTK) || match(CONTINUETK) || match(RETURNTK)) {
         if (match(BREAKTK) ) {
             return parseBreakStmt();
@@ -347,6 +402,9 @@ StmtPtr Parser::parseStmt() {
 // ----- 表达式相关 -----
 ExpPtr Parser::parseCommaExp() {
     auto node = parseAssignExp();
+    if (!node) {
+        return nullptr;
+    }
     if (match(COMMA)) {
         auto commaExp = std::make_unique<CommaExp>(node->getStartLine());
         commaExp->addExp(std::move(node));
@@ -362,46 +420,53 @@ ExpPtr Parser::parseCommaExp() {
 }
 
 ExpPtr Parser::parseAssignExp() {
-    auto node = parseAddExp();
+    auto node = parseLOrExp();
+    if (!node) {
+        return nullptr;
+    }
     if (match(ASSIGN)) {
+        size_t sl = node->getStartLine();
         expect(ASSIGN);
         auto rhs = parseAssignExp();
-        return std::make_unique<AssignExp>(std::move(node), AssignExp::AssignOp::ASSIGN, std::move(rhs), node->getStartLine());
+        return std::make_unique<AssignExp>(std::move(node), AssignExp::AssignOp::ASSIGN, std::move(rhs), sl);
     }
     return node;
 }
 
 ExpPtr Parser::parseLOrExp() {
     auto node = parseLAndExp();
-    while (match(OR)) {
+    while (node && match(OR)) {
+        size_t sl = node->getStartLine();
         expect(OR);
         auto rhs = parseLAndExp();
-        node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::OR, std::move(rhs), node->getStartLine());
+        node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::OR, std::move(rhs), sl);
     }
     return node;
 }
 
 ExpPtr Parser::parseLAndExp() {
     auto node = parseEqExp();
-    while (match(AND)) {
+    while (node && match(AND)) {
+        size_t sl = node->getStartLine();
         expect(AND);
         auto rhs = parseEqExp();
-        node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::AND, std::move(rhs), node->getStartLine());
+        node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::AND, std::move(rhs), sl);
     }
     return node;
 }
 
 ExpPtr Parser::parseEqExp() {
     auto node = parseRelExp();
-    while (match(EQL) || match(NEQ)) {
+    while (node && (match(EQL) || match(NEQ))) {
+        size_t sl = node->getStartLine();
         if (match(EQL)) {
             expect(EQL);
             auto rhs = parseRelExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::EQL, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::EQL, std::move(rhs), sl);
         } else if (match(NEQ)) {
             expect(NEQ);
             auto rhs = parseRelExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::NEQ, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::NEQ, std::move(rhs), sl);
         }
     }
     return node;
@@ -409,23 +474,24 @@ ExpPtr Parser::parseEqExp() {
 
 ExpPtr Parser::parseRelExp() {
     auto node = parseAddExp();
-    while (match(GRE) || match(GEQ) || match(LSS) || match(LEQ)) {
+    while (node && (match(GRE) || match(GEQ) || match(LSS) || match(LEQ))) {
+        size_t sl = node->getStartLine();
         if (match(GRE)) {
             expect(GRE);
             auto rhs = parseAddExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::GRE, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::GRE, std::move(rhs), sl);
         } else if (match(GEQ)) {
             expect(GEQ);
             auto rhs = parseAddExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::GEQ, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::GEQ, std::move(rhs), sl);
         } else if (match(LSS)) {
             expect(LSS);
             auto rhs = parseAddExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::LSS, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::LSS, std::move(rhs), sl);
         } else if (match(LEQ)) {
             expect(LEQ);
             auto rhs = parseAddExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::LEQ, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::LEQ, std::move(rhs), sl);
         }
     }
     return node;
@@ -433,15 +499,16 @@ ExpPtr Parser::parseRelExp() {
 
 ExpPtr Parser::parseAddExp() {
     auto node = parseMulExp();
-    while (match(PLUS) || match(MINU)) {
+    while (node && (match(PLUS) || match(MINU))) {
+        size_t sl = node->getStartLine();
         if (match(PLUS)) {
             expect(PLUS);
             auto rhs = parseMulExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::PLUS, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::PLUS, std::move(rhs), sl);
         } else if (match(MINU)) {
             expect(MINU);
             auto rhs = parseMulExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::MINU, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::MINU, std::move(rhs), sl);
         }
     }
     return node;
@@ -449,19 +516,20 @@ ExpPtr Parser::parseAddExp() {
 
 ExpPtr Parser::parseMulExp() {
     auto node = parseUnaryExp();
-    while (match(MULT) || match(DIV) || match(MOD)) {
+    while (node && (match(MULT) || match(DIV) || match(MOD))) {
+        size_t sl = node->getStartLine();
         if (match(MULT)) {
             expect(MULT);
             auto rhs = parseUnaryExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::MULT, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::MULT, std::move(rhs), sl);
         } else if (match(DIV)) {
             expect(DIV);
             auto rhs = parseUnaryExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::DIV, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::DIV, std::move(rhs), sl);
         } else if (match(MOD)) {
             expect(MOD);
             auto rhs = parseUnaryExp();
-            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::MOD, std::move(rhs), node->getStartLine());
+            node = std::make_unique<BinaryExp>(std::move(node), BinaryExp::BinaryOp::MOD, std::move(rhs), sl);
         }
     }                                                       
     return node;
@@ -487,26 +555,33 @@ ExpPtr Parser::parseUnaryExp() {
 
 ExpPtr Parser::parsePostfixExp() {
     auto node = parsePrimaryExp();
+    if (!node) {
+        return nullptr;
+    }
 
-    // 一维数组 或 函数调用
+    // 数组下标(支持多维) 或 函数调用
     if (match(LBRACK)) {
         std::vector<ExpPtr> subscripts;
-        expect(LBRACK);
-        subscripts.push_back(parseAddExp());
-        expect(RBRACK);
-        node = std::make_unique<SubscriptExp>(std::move(node), std::move(subscripts), node->getStartLine());
+        while (match(LBRACK)) {
+            expect(LBRACK);
+            subscripts.push_back(parseLOrExp());
+            expect(RBRACK);
+        }
+        size_t sl = node->getStartLine();
+        node = std::make_unique<SubscriptExp>(std::move(node), std::move(subscripts), sl);
     } else if (match(LPARENT)) {
         expect(LPARENT);
         std::vector<ExpPtr> realParams;
         if (!match(RPARENT)) {
-            realParams.push_back(parseAddExp());
+            realParams.push_back(parseLOrExp());
             while (match(COMMA)) {
                 expect(COMMA);
-                realParams.push_back(parseAddExp());
+                realParams.push_back(parseLOrExp());
             }
         }
         expect(RPARENT);
-        node = std::make_unique<FunctionCallExp>(std::move(node), std::move(realParams), node->getStartLine());
+        size_t sl = node->getStartLine();
+        node = std::make_unique<FunctionCallExp>(std::move(node), std::move(realParams), sl);
     } 
     return node;
 }
@@ -514,7 +589,8 @@ ExpPtr Parser::parsePostfixExp() {
 ExpPtr Parser::parsePrimaryExp() {
     if (match(LPARENT)) {
         expect(LPARENT);
-        auto node = parseAddExp();
+        // 括号内是完整表达式(含赋值/逗号), 符合 C/SysY 文法 Exp -> '(' Exp ')'
+        auto node = parseCommaExp();
         expect(RPARENT);
         return node;
     } else if (match(INTCON) || match(STRCON)) {
@@ -783,10 +859,27 @@ void Parser::parserLog(const AstNode* root) const {
             }
             if (auto fs = dynamic_cast<const ForStmt*>(node)) {
                 ofs << indentFn(lvl) << "ForStmt (line " << fs->getStartLine() << ")\n";
-                ofs << indentFn(lvl+1) << "Initial:\n";   printNode(fs->getInitial(),   lvl+2);
+                if (fs->hasInitialDecl()) {
+                    ofs << indentFn(lvl+1) << "InitialDecl:\n";
+                    printNode(fs->getInitialDecl(), lvl+2);
+                } else {
+                    ofs << indentFn(lvl+1) << "Initial:\n";   printNode(fs->getInitial(),   lvl+2);
+                }
                 ofs << indentFn(lvl+1) << "Condition:\n"; printNode(fs->getCondition(), lvl+2);
                 ofs << indentFn(lvl+1) << "Iteration:\n"; printNode(fs->getIteration(), lvl+2);
                 ofs << indentFn(lvl+1) << "Body:\n";      printNode(fs->getBody(),      lvl+2);
+                return;
+            }
+            if (auto ws = dynamic_cast<const WhileStmt*>(node)) {
+                ofs << indentFn(lvl) << "WhileStmt (line " << ws->getStartLine() << ")\n";
+                ofs << indentFn(lvl+1) << "Condition:\n"; printNode(ws->getCondition(), lvl+2);
+                ofs << indentFn(lvl+1) << "Body:\n";      printNode(ws->getBody(),      lvl+2);
+                return;
+            }
+            if (auto dws = dynamic_cast<const DoWhileStmt*>(node)) {
+                ofs << indentFn(lvl) << "DoWhileStmt (line " << dws->getStartLine() << ")\n";
+                ofs << indentFn(lvl+1) << "Condition:\n"; printNode(dws->getCondition(), lvl+2);
+                ofs << indentFn(lvl+1) << "Body:\n";      printNode(dws->getBody(),      lvl+2);
                 return;
             }
             if (auto rs = dynamic_cast<const ReturnStmt*>(node)) {

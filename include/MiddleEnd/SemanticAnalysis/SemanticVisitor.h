@@ -118,6 +118,8 @@ public:
     // Statements
     InfoPtr visitExpStmt(ExpStmt* node, ContextPtr context) override;
     InfoPtr visitForStmt(ForStmt* node, ContextPtr context) override;
+    InfoPtr visitWhileStmt(WhileStmt* node, ContextPtr context) override;
+    InfoPtr visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) override;
     InfoPtr visitIfStmt(IfStmt* node, ContextPtr context) override;
     InfoPtr visitBreakStmt(BreakStmt* node, ContextPtr context) override;
     InfoPtr visitContinueStmt(ContinueStmt* node, ContextPtr context) override;

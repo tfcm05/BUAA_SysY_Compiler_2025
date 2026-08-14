@@ -13,6 +13,8 @@ class CommaExp;
 
 class ExpStmt;
 class ForStmt;
+class WhileStmt;
+class DoWhileStmt;
 class IfStmt;
 class BreakStmt;
 class ContinueStmt;
@@ -66,6 +68,8 @@ public:
     // Statements
     virtual InfoPtr visitExpStmt(ExpStmt* node, ContextPtr context) = 0;
     virtual InfoPtr visitForStmt(ForStmt* node, ContextPtr context) = 0;
+    virtual InfoPtr visitWhileStmt(WhileStmt* node, ContextPtr context) = 0;
+    virtual InfoPtr visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) = 0;
     virtual InfoPtr visitIfStmt(IfStmt* node, ContextPtr context) = 0;
     virtual InfoPtr visitBreakStmt(BreakStmt* node, ContextPtr context) = 0;
     virtual InfoPtr visitContinueStmt(ContinueStmt* node, ContextPtr context) = 0;

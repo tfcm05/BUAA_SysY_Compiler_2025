@@ -4,3 +4,5 @@ build/
 !tests/cases/*.out
 !tests/cases/*.in
 !tests/cases/*.err
+
+tests/.work/

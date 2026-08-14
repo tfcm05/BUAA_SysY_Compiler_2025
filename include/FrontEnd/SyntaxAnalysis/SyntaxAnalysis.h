@@ -38,6 +38,8 @@ class Parser {
         ExpStmtPtr parseExpStmt();
         IfStmtPtr parseIfStmt();
         ForStmtPtr parseForStmt();
+        WhileStmtPtr parseWhileStmt();
+        DoWhileStmtPtr parseDoWhileStmt();
         ReturnStmtPtr parseReturnStmt();
         BreakStmtPtr parseBreakStmt();
         ContinueStmtPtr parseContinueStmt();
