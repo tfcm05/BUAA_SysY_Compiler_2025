@@ -11,14 +11,7 @@
 #include <map>
 
 class SemanticInfo : public Info {
-public:
-    enum class InfoKind {
-        DEFAULT,            // 默认
-        CONST_EXP_INFO,   // 常量表达式信息
-    };
 private:
-    InfoKind kind;
-
     // 声明的declType和表达式的expType
     Clang::Type* type;;
 
@@ -31,9 +24,6 @@ private:
     std::string name;
 public:
     SemanticInfo();
-
-    InfoKind getInfoKind() const;
-    void setInfoKind(InfoKind k);
 
     Clang::Type* getType() const;
     void setType(Clang::Type* ty);
@@ -56,7 +46,6 @@ public:
         GENERATE_SYMBOL,   // 生成符号
 
         // 表达式相关
-        CHECK_LVALUE,      // 检查表达式是否为可赋值的左值
         EVALUATE_CONST,    // 检查表达式是否为编译期常量，并求其值
 
         // 语句相关

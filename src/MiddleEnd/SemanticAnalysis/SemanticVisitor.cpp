@@ -2,10 +2,7 @@
 
 // SemanticInfo implementation
 SemanticInfo::SemanticInfo()
-    : kind(InfoKind::DEFAULT), type(nullptr), lValueFlag(false), constValue(0) {}
-
-SemanticInfo::InfoKind SemanticInfo::getInfoKind() const { return kind; }
-void SemanticInfo::setInfoKind(InfoKind k) { kind = k; }
+    : type(nullptr), lValueFlag(false), constValue(0) {}
 
 Clang::Type* SemanticInfo::getType() const { return type; }
 void SemanticInfo::setType(Clang::Type* ty) { type = ty; }
@@ -335,7 +332,6 @@ InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, Context
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
         auto initInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getInitializer()->accept(*this, context));
         if (!initInfo) {
             return nullptr;
@@ -362,7 +358,6 @@ InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr co
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
         
         auto constValue = expInfo->getConstValue();
         if (!constValue || !constValue->isConstInteger()) {
@@ -382,7 +377,6 @@ InfoPtr SemanticVisitor::visitListInitializer(ListInitializer* node, ContextPtr 
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         auto constArray = std::vector<Clang::ConstValue*>{};
         for (size_t i = 0; i < node->getInitializersCount(); ++i) {
@@ -417,7 +411,6 @@ InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
         info->setType(clangContext.getIntegerTyImpl());
         auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
         if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-            info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
             info->setConstValue(clangContext.getConstIntegerImpl(node->getNumberValue()));
         }
     } else if (node->getLiteralType() == LiteralExp::LiteralType::STRING) {
@@ -444,7 +437,6 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
         info->setConstValue(symbol->getConstValue());
     }
 
@@ -536,7 +528,6 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         auto constValue = arrayInfo->getConstValue();
         for (size_t i = 0; i < node->getSubscriptsCount(); ++i) {
@@ -593,7 +584,6 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         auto expConstValue = expInfo->getConstValue();
         if (!expConstValue || !expConstValue->isConstInteger()) {
@@ -637,7 +627,6 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         auto lhsConstValue = lhsInfo->getConstValue();
         if (!lhsConstValue || !lhsConstValue->isConstInteger()) {
