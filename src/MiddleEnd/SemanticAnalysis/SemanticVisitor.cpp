@@ -104,46 +104,46 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
     auto sc = node->getDeclSpec().getStorageClass();
 
     auto varType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
+    bool isConstVar = node->getDeclSpec().isConst();
 
-    // 全局变量: visitCompUnit 传入的 context 为 EVALUATE_CONST
+    // C 存储期判定: 全局变量 (visitCompUnit 传入 EVALUATE_CONST) 和 static 局部变量具有静态存储期
+    // 静态存储期对象的初始化器必须是常量表达式 (C 标准)
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    bool isGlobal = semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST;
+    bool isStaticStorage = (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST)
+                           || (sc == StorageClass::STATIC);
 
     auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     varContext->setType(varType);
 
     for (size_t i = 0; i < node->getDeclaratorsCount(); ++i) {
-        // 是否有初始化器 (`int x;` 等裸声明符没有, 对应 C 的零初始化)
         bool hasInit = dynamic_cast<InitialDeclarator*>(node->getDeclarator(i)) != nullptr;
-
         std::shared_ptr<SemanticInfo> varInfo;
-        if (isGlobal || sc == StorageClass::STATIC || node->getDeclSpec().isConst()) {
-            // 先做常量求值: 全局/static 变量的初始化器必须是常量表达式 (C 语义);
-            // const 变量也先尝试常量求值, 以保留 SysY 中 const 变量可用作数组尺寸等编译期常量的能力
+
+        // 静态存储期 (全局/static) 或 const 变量: 先尝试常量求值
+        //   全局/static: 非常量初始化器 → 报错 (C 语义)
+        //   局部 const: 非常量初始化器 → 回退普通求值 (C: const 是只读限定符, 非编译期常量)
+        if (isStaticStorage || isConstVar) {
             auto constContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
             constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
             varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, constContext));
 
             if (!varInfo) {
-                // 声明失败(如数组尺寸非常量), 错误已记录, 跳过该声明符
-                continue;
+                continue;  // 声明失败 (如数组尺寸非常量), 错误已记录
             }
 
             if (hasInit && !varInfo->getConstValue()) {
-                if (isGlobal || sc == StorageClass::STATIC) {
-                    // C 语义: 全局/static 对象必须用常量表达式初始化
-                    std::cout << "Error: Initializer of a global/static variable must be a constant expression, line: " << node->getStartLine() << std::endl;
-                    incrementErrorCount();
+                if (isStaticStorage) {
+                    semanticError(node->getStartLine(), "Initializer of a global/static variable must be a constant expression");
                     continue;
                 }
-                // 局部 const 变量可用非常量表达式初始化 (C 语义: const 是只读限定符, 不要求编译期常量)
+                // 局部 const: 回退普通求值
                 varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
                 if (!varInfo) {
                     continue;
                 }
             }
         } else {
-            // 局部普通变量: 普通求值
+            // 局部自动变量: 普通求值
             varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
             if (!varInfo) {
                 continue;
@@ -263,14 +263,12 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
                 }
                 auto constValue = constInfo->getConstValue();
                 if (!constValue || !constValue->isConstInteger()) {
-                    std::cout << "Error: Array size is not a constant integer, line: " << node->getStartLine() << std::endl;
-                    incrementErrorCount();
+                    semanticError(node->getStartLine(), "Array size is not a constant integer");
                     return nullptr;
                 }
                 auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
                 if (intValue <= 0) {
-                    std::cout << "Error: Array size must be positive, line: " << node->getStartLine() << std::endl;
-                    incrementErrorCount();
+                    semanticError(node->getStartLine(), "Array size must be positive");
                     return nullptr;
                 }
                 currentType = clangContext.getArrayTyImpl(currentType, intValue);
@@ -288,14 +286,12 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
             }
             auto constValue = constInfo->getConstValue();
             if (!constValue || !constValue->isConstInteger()) {
-                std::cout << "Error: Array size is not a constant integer, line: " << node->getStartLine() << std::endl;
-                    incrementErrorCount();
+                semanticError(node->getStartLine(), "Array size is not a constant integer");
                 return nullptr;
             }
             auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
             if (intValue <= 0) {
-                std::cout << "Error: Array size must be positive, line: " << node->getStartLine() << std::endl;
-                    incrementErrorCount();
+                semanticError(node->getStartLine(), "Array size must be positive");
                 return nullptr;
             }
             currentType = clangContext.getArrayTyImpl(currentType, intValue);
@@ -456,8 +452,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getFunction()->accept(*this, context));
     
     if (!funcInfo || !funcInfo->getType() || !funcInfo->getType()->isFunctionTy()) {
-        std::cout << "Error: Calling a non-function type, line: " << node->getStartLine() << std::endl;
-        incrementErrorCount();
+        semanticError(node->getStartLine(), "Calling a non-function type");
         return nullptr;
     }
     auto funcType = static_cast<Clang::FunctionType*>(funcInfo->getType());
@@ -510,8 +505,7 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     }
     auto arrayInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArray()->accept(*this, context));
     if (!arrayInfo || !arrayInfo->getType() || (!arrayInfo->getType()->isArrayTy() && !arrayInfo->getType()->isPointerTy())) {
-        std::cout << "Error: Subscript operator applied to non-array and non-pointer type, line: " << node->getStartLine() << std::endl;
-        incrementErrorCount();
+        semanticError(node->getStartLine(), "Subscript operator applied to non-array and non-pointer type");
         return nullptr;
     }
     
@@ -547,8 +541,7 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
                 return info;
             }
             if (!constValue->isConstArray()) {
-                std::cout << "Error: Subscripted array is not a constant array, line: " << node->getStartLine() << std::endl;
-                incrementErrorCount();
+                semanticError(node->getStartLine(), "Subscripted array is not a constant array");
                 return nullptr;
             }
             auto constArray = static_cast<Clang::ConstArray*>(constValue);
@@ -667,8 +660,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
         // 编译期可检出的除零/模零 (C 语义: 除零为 UB, 编译器报错而非崩溃)
         if ((node->getBinaryOp() == BinaryExp::BinaryOp::DIV || node->getBinaryOp() == BinaryExp::BinaryOp::MOD) && rhsIntValue == 0) {
-            std::cout << "Error: Division by zero in constant expression, line: " << node->getStartLine() << std::endl;
-            incrementErrorCount();
+            semanticError(node->getStartLine(), "Division by zero in constant expression");
             return nullptr;
         }
 
@@ -715,8 +707,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
                 constValue = (lhsIntValue > rhsIntValue) ? 1 : 0;
                 break;
             default:
-                std::cout << "Error: Unknown binary operator in constant expression evaluation, line: " << node->getStartLine() << std::endl;
-                incrementErrorCount();
+                semanticError(node->getStartLine(), "Unknown binary operator in constant expression evaluation");
                 return nullptr;
         }
         info->setConstValue(clangContext.getConstIntegerImpl(constValue));
@@ -739,8 +730,7 @@ InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
     }
     auto lhsType = lhsInfo->getType();
     if (!lhsInfo->isLValue()) {
-        std::cout << "Error: Left-hand side of assignment is not an l-value, line: " << node->getStartLine() << std::endl;
-        incrementErrorCount();
+        semanticError(node->getStartLine(), "Left-hand side of assignment is not an l-value");
         return nullptr;
     }
     if (lhsType->isConst()) {

@@ -25,6 +25,11 @@ void incrementErrorCount() {
     nonStandardErrorCount++;
 }
 
+void semanticError(int line, const std::string& message) {
+    std::cout << "Error: " << message << ", line: " << line << std::endl;
+    incrementErrorCount();
+}
+
 int getErrorCount() {
     return (int)errorList.size() + nonStandardErrorCount;
 }

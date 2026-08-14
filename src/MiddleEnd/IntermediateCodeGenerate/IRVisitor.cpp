@@ -187,7 +187,9 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
         auto llvmType = convertType(symbol->getType());
 
         auto irContext = std::dynamic_pointer_cast<IRContext>(context);
-        if (irContext->getVisitPurpose() == IRContext::CREATE_GLOBAL_VARIABLE) {
+        // 全局和 static 都用全局变量实现 (C: static 具有静态存储期), 区别仅在初始化上下文
+        bool isGlobalVar = (irContext->getVisitPurpose() == IRContext::CREATE_GLOBAL_VARIABLE) || symbol->isStatic();
+        if (isGlobalVar) {
             auto globalVar = builder.createGlobalVariable(llvmType);
             module.addGlobalVariable(globalVar);
             symbol->setValue(globalVar);
@@ -197,10 +199,11 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
                 continue;
             }
 
-            auto initializerContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-            initializerContext->setType(llvmType);
+            auto initContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+            initContext->setVisitPurpose(IRContext::CREATE_GLOBAL_VARIABLE); // 全局/static 初始化器需常量求值
+            initContext->setType(llvmType);
 
-            auto initializerInfo = std::dynamic_pointer_cast<IRInfo>(initDeclarator->getInitializer()->accept(*this, initializerContext));
+            auto initializerInfo = std::dynamic_pointer_cast<IRInfo>(initDeclarator->getInitializer()->accept(*this, initContext));
             if (!initializerInfo) {
                 continue;
             }
@@ -208,42 +211,20 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
                 globalVar->setInitializer(constantValue);
             }
         } else {
-            if (symbol->isStatic()) {
-                auto globalVar = builder.createGlobalVariable(llvmType);
-                module.addGlobalVariable(globalVar);
-                symbol->setValue(globalVar);
+            // 局部自动变量: alloca + store
+            auto allocaInst = builder.createAlloca(llvmType);
+            symbol->setValue(allocaInst);
 
-                auto initDeclarator = dynamic_cast<InitialDeclarator*>(declarator);
-                if (!initDeclarator || !initDeclarator->getInitializer()) {
-                    continue;
-                }
+            auto addressContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+            addressContext->setValue(allocaInst);
+            addressContext->setType(llvmType);
 
-                auto staticContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-                staticContext->setVisitPurpose(IRContext::CREATE_GLOBAL_VARIABLE);
-                staticContext->setType(llvmType);
-
-                auto initializerInfo = std::dynamic_pointer_cast<IRInfo>(initDeclarator->getInitializer()->accept(*this, staticContext));
-                if (!initializerInfo) {
-                    continue;
-                }
-                if (auto constantValue = dynamic_cast<Constant*>(initializerInfo->getValue())) {
-                    globalVar->setInitializer(constantValue);
-                }
-            } else {
-                auto allocaInst = builder.createAlloca(llvmType);
-                symbol->setValue(allocaInst);
-
-                auto addressContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-                addressContext->setValue(allocaInst);
-                addressContext->setType(llvmType);
-
-                auto initDeclarator = dynamic_cast<InitialDeclarator*>(declarator);
-                if (!initDeclarator || !initDeclarator->getInitializer()) {
-                    continue;
-                }
-
-                initDeclarator->getInitializer()->accept(*this, addressContext);
+            auto initDeclarator = dynamic_cast<InitialDeclarator*>(declarator);
+            if (!initDeclarator || !initDeclarator->getInitializer()) {
+                continue;
             }
+
+            initDeclarator->getInitializer()->accept(*this, addressContext);
         }
     }
 

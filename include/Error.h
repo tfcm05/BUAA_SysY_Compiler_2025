@@ -18,8 +18,11 @@ typedef enum {
 
 void errorLog(ErrorCode errorCode, int line, const std::string& msg = "");
 
-// 非标准 SysY 错误 (无标准错误码) 的计数: 仅递增错误总数, 不写入 error.txt
-// 用于阻止 IR 生成 (如: 全局/static 初始化器非常量, 编译期除零等)
+// 统一语义错误报告: 输出到 stdout + 递增错误计数 (阻止 IR 生成)
+// 用于无标准 SysY 错误码的语义错误 (全局/static 初始化器非常量、编译期除零等)
+void semanticError(int line, const std::string& message);
+
+// 仅递增错误计数, 不输出 (配合自定义错误输出使用)
 void incrementErrorCount();
 
 std::string errorCodeToString(ErrorCode code);
