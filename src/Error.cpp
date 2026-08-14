@@ -13,14 +13,20 @@ namespace {
     };
 
     std::vector<ErrorInfo> errorList;
+    int nonStandardErrorCount = 0;  // 非标准错误计数 (不写入 error.txt, 仅阻止 IR gen)
 }
 
 void errorLog(ErrorCode errorCode, int line, const std::string& msg) {
     errorList.push_back({line, errorCode, msg});
 }
 
+void incrementErrorCount() {
+    // 不写入 error.txt (无标准错误码), 但递增错误计数以阻止 IR 生成
+    nonStandardErrorCount++;
+}
+
 int getErrorCount() {
-    return (int)errorList.size();
+    return (int)errorList.size() + nonStandardErrorCount;
 }
 
 std::string errorCodeToString(ErrorCode code) {
