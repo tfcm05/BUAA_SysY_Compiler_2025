@@ -1,0 +1,10 @@
+void putint(int a);
+int f() {
+    return 42;
+    int x;
+}
+
+int main() {
+    putint(f());
+    return 0;
+}

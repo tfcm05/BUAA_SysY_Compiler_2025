@@ -4,16 +4,19 @@
 #include <string>
 
 typedef enum {
-    a, // illegal character
-    b, // declared twice
-    c, // undefined identifier
-    d, // function call parameter mismatch
-    e, // function call parameter type mismatch
-    f, g,  // function return type mismatch
-    h, // const variable assignment
-    i, j, k, // missing right bracket
-    l, // printf parameter mismatch
-    m, // break or continue outside of loop
+    IllegalChar,               // a: 非法字符
+    RedefinedName,             // b: 名字重定义
+    UndefinedName,             // c: 未定义的名字
+    ParamCountMismatch,        // d: 函数参数个数不匹配
+    ParamTypeMismatch,         // e: 函数参数类型不匹配
+    ReturnTypeMismatch,        // f: return 语句与函数返回类型不匹配
+    MissingReturn,             // g: 有返回值的函数缺少 return 语句
+    ConstAssignment,           // h: 不能改变常量的值
+    MissingSemicolon,          // i: 缺少分号
+    MissingRightParen,         // j: 缺少右小括号
+    MissingRightBracket,       // k: 缺少右中括号
+    PrintfFormatMismatch,      // l: printf 格式不匹配 (已无调用, 保留)
+    BreakContinueOutsideLoop,  // m: 非循环块中使用 break/continue
 } ErrorCode;
 
 void errorLog(ErrorCode errorCode, int line, const std::string& msg = "");

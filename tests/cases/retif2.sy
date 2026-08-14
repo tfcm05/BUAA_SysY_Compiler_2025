@@ -1,0 +1,12 @@
+void putint(int a);
+int f(int a) {
+    if (a > 0) {
+        return a;
+    }
+    return 0;
+}
+
+int main() {
+    putint(f(5));
+    return 0;
+}

@@ -79,11 +79,11 @@ void Parser::expect(TokenType expect) {
                   << " at line " << CURRENT_LINE << std::endl;
         
         if (expect == SEMICN) {
-            errorLog(ErrorCode::i, preLine);
+            errorLog(ErrorCode::MissingSemicolon, preLine);
         } else if (expect == RPARENT) {
-            errorLog(ErrorCode::j, preLine);
+            errorLog(ErrorCode::MissingRightParen, preLine);
         } else if (expect == RBRACK) {
-            errorLog(ErrorCode::k, preLine);
+            errorLog(ErrorCode::MissingRightBracket, preLine);
         }
 
         // 失败时也推进一个 token (文件末尾除外), 防止语法错误导致无限循环

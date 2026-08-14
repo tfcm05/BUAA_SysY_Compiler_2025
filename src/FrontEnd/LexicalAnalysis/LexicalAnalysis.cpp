@@ -176,7 +176,7 @@ Token LexicalAnalysis::getNextTokenInternal() {
                 return Token(line, TokenType::ELLIPSIS, "...");
             }
         }
-        errorLog(ErrorCode::a, line);
+        errorLog(ErrorCode::IllegalChar, line);
         return Token(line, TokenType::ERROR, ".");
     }
 
@@ -209,7 +209,7 @@ Token LexicalAnalysis::getNextTokenInternal() {
             return Token(line, TokenType::AND, "&&");
         } else {
             // 错误处理
-            errorLog(ErrorCode::a, line);
+            errorLog(ErrorCode::IllegalChar, line);
             advance();
             return Token(line, TokenType::AND, "&&");
         }
@@ -220,7 +220,7 @@ Token LexicalAnalysis::getNextTokenInternal() {
             return Token(line, TokenType::OR, "||");
         } else {
             // 错误处理
-            errorLog(ErrorCode::a, line);
+            errorLog(ErrorCode::IllegalChar, line);
             advance();
             return Token(line, TokenType::OR, "||");
         }

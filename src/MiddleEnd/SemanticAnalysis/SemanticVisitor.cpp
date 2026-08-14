@@ -151,7 +151,7 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
         }
 
         if (curScope->existInCurScope(varInfo->getName())) {
-            errorLog(ErrorCode::b, node->getStartLine(), varInfo->getName());
+            errorLog(ErrorCode::RedefinedName, node->getStartLine(), varInfo->getName());
         } else {
             auto symbol = createSymbol(varInfo->getName(), sc, varInfo->getType(), Symbol::VARIABLE, varInfo->getConstValue());
             // 将Symbol信息存储到Declarator中
@@ -178,7 +178,7 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
    
     if (curScope->existInCurScope(funcInfo->getName())) {
-        errorLog(ErrorCode::b, node->getStartLine(), funcInfo->getName());
+        errorLog(ErrorCode::RedefinedName, node->getStartLine(), funcInfo->getName());
     } else {
         auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
         // 将Symbol信息存储到Declarator中
@@ -220,7 +220,7 @@ InfoPtr SemanticVisitor::visitParameterDecl(ParameterDecl* node, ContextPtr cont
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::GENERATE_SYMBOL) {
         if (curScope->existInCurScope(paramInfo->getName())) {
-            errorLog(ErrorCode::b, node->getStartLine(), paramInfo->getName());
+            errorLog(ErrorCode::RedefinedName, node->getStartLine(), paramInfo->getName());
         } else {
             auto symbol = createSymbol(paramInfo->getName(), sc, paramInfo->getType(), Symbol::PARAMETER, nullptr);
             // 将Symbol信息存储到Declarator中
@@ -440,7 +440,7 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
     auto symbol = curScope->lookup(node->getIdentifier());
 
     if (!symbol) {
-        errorLog(ErrorCode::c, node->getStartLine(), node->getIdentifier());
+        errorLog(ErrorCode::UndefinedName, node->getStartLine(), node->getIdentifier());
         return nullptr;
     }
     // 将Symbol信息存储到AstNode中
@@ -482,7 +482,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
             if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
                 funcName = idExp->getIdentifier();
             }
-            errorLog(ErrorCode::d, node->getStartLine(), funcName);
+            errorLog(ErrorCode::ParamCountMismatch, node->getStartLine(), funcName);
             return nullptr;
         }
         // 检查固定参数的类型匹配
@@ -496,7 +496,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
                 if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
                     funcName = idExp->getIdentifier();
                 }
-                errorLog(ErrorCode::e, node->getStartLine(), funcName);
+                errorLog(ErrorCode::ParamTypeMismatch, node->getStartLine(), funcName);
                 return nullptr;
             }
         }
@@ -514,7 +514,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
         if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
             funcName = idExp->getIdentifier();
         }
-        errorLog(ErrorCode::d, node->getStartLine(), funcName);
+        errorLog(ErrorCode::ParamCountMismatch, node->getStartLine(), funcName);
         return nullptr;
     } else {
         for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
@@ -530,7 +530,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
                 if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
                     funcName = idExp->getIdentifier();
                 }
-                errorLog(ErrorCode::e, node->getStartLine(), funcName);
+                errorLog(ErrorCode::ParamTypeMismatch, node->getStartLine(), funcName);
                 return nullptr;
             }
         }
@@ -779,7 +779,7 @@ InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
         if (auto idExp = dynamic_cast<IdentifierExp*>(node->getLhs())) {
             name = idExp->getIdentifier();
         }
-        errorLog(ErrorCode::h, node->getStartLine(), name);
+        errorLog(ErrorCode::ConstAssignment, node->getStartLine(), name);
         return nullptr;
     }
 
@@ -870,7 +870,7 @@ InfoPtr SemanticVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
 InfoPtr SemanticVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (!semanticContext->inLoop()) {
-        errorLog(ErrorCode::m, node->getStartLine());
+        errorLog(ErrorCode::BreakContinueOutsideLoop, node->getStartLine());
     }
 
     return nullptr;
@@ -879,7 +879,7 @@ InfoPtr SemanticVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
 InfoPtr SemanticVisitor::visitContinueStmt(ContinueStmt* node, ContextPtr context) {
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (!semanticContext->inLoop()) {
-        errorLog(ErrorCode::m, node->getStartLine());
+        errorLog(ErrorCode::BreakContinueOutsideLoop, node->getStartLine());
     }
 
     return nullptr;
@@ -893,10 +893,10 @@ InfoPtr SemanticVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
         node->getReturnExp()->accept(*this, context);
         // C 语义: void 函数不得 return 表达式
         if (returnType->isVoidTy()) {
-            errorLog(ErrorCode::f, node->getStartLine());
+            errorLog(ErrorCode::ReturnTypeMismatch, node->getStartLine());
         }
     } else if (!returnType->isVoidTy()) {
-        errorLog(ErrorCode::f, node->getStartLine());
+        errorLog(ErrorCode::ReturnTypeMismatch, node->getStartLine());
     } 
 
     return nullptr;
@@ -916,10 +916,13 @@ static bool alwaysReturns(AstNode* node) {
         return alwaysReturns(ifStmt->getTrueStmt()) && alwaysReturns(ifStmt->getFalseStmt());
     }
     if (auto blockStmt = dynamic_cast<BlockStmt*>(node)) {
-        if (blockStmt->getBlockItemsCount() == 0) {
-            return false;
+        // 遍历块中所有语句: 任何一条保证返回即可 (return 可在块中间, 后续为 unreachable)
+        for (size_t i = 0; i < blockStmt->getBlockItemsCount(); ++i) {
+            if (alwaysReturns(blockStmt->getBlockItem(i))) {
+                return true;
+            }
         }
-        return alwaysReturns(blockStmt->getBlockItem(blockStmt->getBlockItemsCount() - 1));
+        return false;
     }
     return false;
 }
@@ -936,10 +939,9 @@ InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
         
         auto returnType = semanticContext->getType();
         if (!returnType->isVoidTy()) {
-            // 函数体必须保证以 return 结束: 空体或最后一条语句不保证返回 → 缺 return
-            if (node->getBlockItemsCount() == 0 ||
-                !alwaysReturns(node->getBlockItem(node->getBlockItemsCount() - 1))) {
-                errorLog(ErrorCode::g, node->getEndLine());
+            // 函数体必须保证以 return 结束: 遍历所有语句, 任何一条保证返回即可
+            if (!alwaysReturns(node)) {
+                errorLog(ErrorCode::MissingReturn, node->getEndLine());
             }
         }
     } else {
