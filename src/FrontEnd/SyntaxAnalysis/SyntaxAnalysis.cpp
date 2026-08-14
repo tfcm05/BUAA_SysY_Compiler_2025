@@ -156,6 +156,14 @@ DeclaratorPtr Parser::parseDeclarator() {
         declarator = std::make_unique<InitialDeclarator>(std::move(declarator), parseInitializer(), startLine);
     }
 
+    // C abstract declarator: 函数原型可省略参数名 (如 void putint(int);)
+    // 未匹配到标识符且无数组/函数修饰时, 生成匿名标识符占位, 使 
+    // visitParameterDecl 的 getDeclarator()->accept() 不因空指针崩溃
+    if (!declarator) {
+        declarator = std::make_unique<IdentDeclarator>(
+            "__anon_param_" + std::to_string(startLine), startLine);
+    }
+
     return declarator;
 }
 
