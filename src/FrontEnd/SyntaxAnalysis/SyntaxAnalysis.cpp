@@ -302,8 +302,9 @@ ForStmtPtr Parser::parseForStmt() {
     bool declInit = false;
     if (!match(SEMICN)) {
         // for(int i = 0; cond; step) 形式的初始化声明 (SysY 文法 InitStmt 可为声明)
-        if (match(INTTK) || match(CONSTTK) || match(STATICTK)) {
-            node->setInitialDecl(parseVarDecl()); // parseVarDecl 内部消费 ';'
+        // C 语法: for 头声明只能是普通/[const] 变量声明, 不允许 static
+        if (match(INTTK) || (match(CONSTTK) && match(INTTK, 1))) {
+            node->setInitial(parseVarDecl()); // parseVarDecl 内部消费 ';'
             declInit = true;
         } else {
             node->setInitial(parseCommaExp());
@@ -865,11 +866,13 @@ void Parser::parserLog(const AstNode* root) const {
             }
             if (auto fs = dynamic_cast<const ForStmt*>(node)) {
                 ofs << indentFn(lvl) << "ForStmt (line " << fs->getStartLine() << ")\n";
-                if (fs->hasInitialDecl()) {
-                    ofs << indentFn(lvl+1) << "InitialDecl:\n";
-                    printNode(fs->getInitialDecl(), lvl+2);
-                } else {
-                    ofs << indentFn(lvl+1) << "Initial:\n";   printNode(fs->getInitial(),   lvl+2);
+                if (fs->getInitial()) {
+                    if (dynamic_cast<const VariableDecl*>(fs->getInitial())) {
+                        ofs << indentFn(lvl+1) << "InitialDecl:\n";
+                    } else {
+                        ofs << indentFn(lvl+1) << "Initial:\n";
+                    }
+                    printNode(fs->getInitial(), lvl+2);
                 }
                 ofs << indentFn(lvl+1) << "Condition:\n"; printNode(fs->getCondition(), lvl+2);
                 ofs << indentFn(lvl+1) << "Iteration:\n"; printNode(fs->getIteration(), lvl+2);

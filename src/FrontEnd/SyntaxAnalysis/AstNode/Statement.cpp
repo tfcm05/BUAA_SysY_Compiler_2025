@@ -30,27 +30,14 @@ InfoPtr ExpStmt::accept(AstVisitor& visitor, ContextPtr context) {
 ForStmt::ForStmt(size_t sl)
     : Stmt(sl) {}
 
-Exp* ForStmt::getInitial() const {
+AstNode* ForStmt::getInitial() const {
     return initial.get();
 }
-ExpPtr ForStmt::releaseInitial() {
+AstNodePtr ForStmt::releaseInitial() {
     return std::move(initial);
 }
-void ForStmt::setInitial(ExpPtr s) {
+void ForStmt::setInitial(AstNodePtr s) {
     initial = std::move(s);
-}
-
-bool ForStmt::hasInitialDecl() const {
-    return initialDecl != nullptr;
-}
-VariableDecl* ForStmt::getInitialDecl() const {
-    return initialDecl.get();
-}
-VariableDeclPtr ForStmt::releaseInitialDecl() {
-    return std::move(initialDecl);
-}
-void ForStmt::setInitialDecl(VariableDeclPtr d) {
-    initialDecl = std::move(d);
 }
 
 Exp* ForStmt::getCondition() const {

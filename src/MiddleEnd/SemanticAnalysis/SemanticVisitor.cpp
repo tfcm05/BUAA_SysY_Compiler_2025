@@ -518,6 +518,10 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     auto info = std::make_shared<SemanticInfo>();
     auto resultType = arrayInfo->getType();
     for (size_t i = node->getSubscriptsCount(); i > 0; --i) {
+        if (!node->getSubscript(i - 1)) {
+            // 语法错误恢复后可能产生空子节点
+            continue;
+        }
         node->getSubscript(i - 1)->accept(*this, context);
         if (resultType->isArrayTy()) {
             auto arrayType = static_cast<Clang::ArrayType*>(resultType);
@@ -533,11 +537,14 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
-        
+
         auto constValue = arrayInfo->getConstValue();
         for (size_t i = 0; i < node->getSubscriptsCount(); ++i) {
+            if (!node->getSubscript(i)) {
+                return nullptr;
+            }
             if (!constValue) {
-                info->setConstValue(clangContext.getConstIntegerImpl(0));
+                // 非 const 数组(参数/局部/无常量值): 该下标表达式不是常量, 软失败交由上层决定
                 return info;
             }
             if (!constValue->isConstArray()) {
@@ -547,21 +554,22 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
             auto constArray = static_cast<Clang::ConstArray*>(constValue);
 
             auto subscriptInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getSubscript(i)->accept(*this, context));
+            if (!subscriptInfo) {
+                // 下标表达式求值失败, 错误已由子节点记录
+                return nullptr;
+            }
             auto subscriptConstValue = subscriptInfo->getConstValue();
             if (!subscriptConstValue || !subscriptConstValue->isConstInteger()) {
-                std::cout << "Error: Subscript is not a constant integer, line: " << node->getStartLine() << std::endl;
-                return nullptr;
+                // 非常量下标: 软失败
+                return info;
             }
             auto subscriptIntValue = static_cast<Clang::ConstInteger*>(subscriptConstValue)->getIntValue();
             if (subscriptIntValue < 0 || static_cast<size_t>(subscriptIntValue) >= constArray->getElementsSize()) {
-                info->setConstValue(clangContext.getConstIntegerImpl(0));
+                // 越界下标: 软失败, 交由上层决定 (全局/static 报"必须常量", 局部回退普通求值)
                 return info;
             }
 
             constValue = constArray->getElement(subscriptIntValue);
-        }
-        if (!constValue) {
-            info->setConstValue(nullptr);
         }
         info->setConstValue(constValue);
     }
@@ -619,7 +627,9 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         return nullptr;
     }
     auto lhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getLhs()->accept(*this, context));
-    auto rhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getRhs()->accept(*this, context));
+    if (!lhsInfo) {
+        return nullptr;
+    }
 
     auto info = std::make_shared<SemanticInfo>();
     info->setType(clangContext.getIntegerTyImpl());
@@ -627,9 +637,6 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        if (!lhsInfo || !rhsInfo) {
-            return nullptr;
-        }
         info->setInfoKind(SemanticInfo::InfoKind::CONST_EXP_INFO);
 
         auto lhsConstValue = lhsInfo->getConstValue();
@@ -638,11 +645,34 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             return info;
         }
         auto lhsIntValue = static_cast<Clang::ConstInteger*>(lhsConstValue)->getIntValue();
+
+        // 短路求值: && 左侧为 0 / || 左侧非 0 时无需求右侧 (C 语义, 也避免 0 && (1/0) 除零)
+        if (node->getBinaryOp() == BinaryExp::BinaryOp::AND && lhsIntValue == 0) {
+            info->setConstValue(clangContext.getConstIntegerImpl(0));
+            return info;
+        }
+        if (node->getBinaryOp() == BinaryExp::BinaryOp::OR && lhsIntValue != 0) {
+            info->setConstValue(clangContext.getConstIntegerImpl(1));
+            return info;
+        }
+
+        auto rhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getRhs()->accept(*this, context));
+        if (!rhsInfo) {
+            return nullptr;
+        }
         auto rhsConstValue = rhsInfo->getConstValue();
         if (!rhsConstValue || !rhsConstValue->isConstInteger()) {
+            // 非常量操作数: 软失败
             return info;
         }
         auto rhsIntValue = static_cast<Clang::ConstInteger*>(rhsConstValue)->getIntValue();
+
+        // 编译期可检出的除零/模零 (C 语义: 除零为 UB, 编译器报错而非崩溃)
+        if ((node->getBinaryOp() == BinaryExp::BinaryOp::DIV || node->getBinaryOp() == BinaryExp::BinaryOp::MOD) && rhsIntValue == 0) {
+            std::cout << "Error: Division by zero in constant expression, line: " << node->getStartLine() << std::endl;
+            return nullptr;
+        }
+
         int64_t constValue;
         switch (node->getBinaryOp()) {
             case BinaryExp::BinaryOp::PLUS:
@@ -670,6 +700,9 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             case BinaryExp::BinaryOp::EQL:
                 constValue = (lhsIntValue == rhsIntValue) ? 1 : 0;
                 break;
+            case BinaryExp::BinaryOp::NEQ:
+                constValue = (lhsIntValue != rhsIntValue) ? 1 : 0;
+                break;
             case BinaryExp::BinaryOp::LEQ:
                 constValue = (lhsIntValue <= rhsIntValue) ? 1 : 0;
                 break;
@@ -687,6 +720,9 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
                 return nullptr;
         }
         info->setConstValue(clangContext.getConstIntegerImpl(constValue));
+    } else {
+        // 非常量上下文: 右侧仍需语义检查
+        node->getRhs()->accept(*this, context);
     }
 
     return info;
@@ -742,9 +778,7 @@ InfoPtr SemanticVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
 InfoPtr SemanticVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     // for 头声明的变量作用域覆盖整个 for 语句 (C/SysY 语义)
     ScopeGuard guard(curScope);
-    if (node->hasInitialDecl()) {
-        node->getInitialDecl()->accept(*this, context);
-    } else if (node->getInitial()) {
+    if (node->getInitial()) {
         node->getInitial()->accept(*this, context);
     }
     if (node->getCondition()) {
@@ -756,7 +790,9 @@ InfoPtr SemanticVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
 
     auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     cloneContext->setLoopFlag(true);
-    node->getBody()->accept(*this, cloneContext);
+    if (node->getBody()) {
+        node->getBody()->accept(*this, cloneContext);
+    }
 
     return nullptr;
 }
@@ -823,11 +859,37 @@ InfoPtr SemanticVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
 
     if (node->getReturnExp()) {
         node->getReturnExp()->accept(*this, context);
+        // C 语义: void 函数不得 return 表达式
+        if (returnType->isVoidTy()) {
+            errorLog(ErrorCode::f, node->getStartLine());
+        }
     } else if (!returnType->isVoidTy()) {
         errorLog(ErrorCode::f, node->getStartLine());
     } 
 
     return nullptr;
+}
+
+// 判断语句是否保证以 return 结束 (缺 return 分析, 对应 C 的 always-return 判定):
+//   return 语句 → true; if 带 else 且两分支都保证 → true; 块语句最后一条保证 → true; 其余 false
+static bool alwaysReturns(AstNode* node) {
+    if (auto retStmt = dynamic_cast<ReturnStmt*>(node)) {
+        (void)retStmt;
+        return true;
+    }
+    if (auto ifStmt = dynamic_cast<IfStmt*>(node)) {
+        if (!ifStmt->getFalseStmt() || !ifStmt->getTrueStmt()) {
+            return false;   // 无 else: 条件为假时可能不执行
+        }
+        return alwaysReturns(ifStmt->getTrueStmt()) && alwaysReturns(ifStmt->getFalseStmt());
+    }
+    if (auto blockStmt = dynamic_cast<BlockStmt*>(node)) {
+        if (blockStmt->getBlockItemsCount() == 0) {
+            return false;
+        }
+        return alwaysReturns(blockStmt->getBlockItem(blockStmt->getBlockItemsCount() - 1));
+    }
+    return false;
 }
 
 InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
@@ -842,13 +904,10 @@ InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
         
         auto returnType = semanticContext->getType();
         if (!returnType->isVoidTy()) {
-            if (node->getBlockItemsCount() == 0) {
+            // 函数体必须保证以 return 结束: 空体或最后一条语句不保证返回 → 缺 return
+            if (node->getBlockItemsCount() == 0 ||
+                !alwaysReturns(node->getBlockItem(node->getBlockItemsCount() - 1))) {
                 errorLog(ErrorCode::g, node->getEndLine());
-            } else {
-                auto lastBlockItem = node->getBlockItem(node->getBlockItemsCount() - 1);
-                if (dynamic_cast<ReturnStmt*>(lastBlockItem) == nullptr) {
-                    errorLog(ErrorCode::g, node->getEndLine());
-                }
             }
         }
     } else {

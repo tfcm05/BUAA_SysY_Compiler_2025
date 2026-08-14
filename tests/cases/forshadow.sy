@@ -1,0 +1,9 @@
+void putint(int a);
+int main() {
+    int i = 9;              // 外层 i
+    for (int i = 0; i < 2; i = i + 1) {
+        putint(i);          // for 内 i: 0 1
+    }
+    putint(i);              // 外层 i: 9
+    return 0;
+}

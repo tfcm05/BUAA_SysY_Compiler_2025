@@ -14,18 +14,26 @@ std::string IRBuilder::ensureName(const std::string& prefix, const std::string& 
 }
 
 void IRBuilder::ensureTerminatorInCurrentFunction() {
-    if (currentFunction) {
-        for (size_t i = 0; i < currentFunction->getBasicBlocksCount(); ++i) {
-            auto bb = currentFunction->getBasicBlock(i);
-            if (bb->isTerminator()) {
-                continue;
-            } else {
-                // 如果没有终止指令，添加一个ret void指令
-                auto retInst = new RetInstr(nullptr, ensureName(bb->getName(), "ret"));
-                bb->addInstruction(retInst);
-                bb->setTerminator(true);
-            }
+    if (!currentFunction) return;
+    // C 语义: 函数末尾缺 return 时需默认终止; 终止类型与返回类型一致
+    //   void → ret void;  int → ret i32 0  (静态默认值, 语义层 g 错误已诊断)
+    LLVM::Type* returnType = llvmContext.getVoidTyImpl();
+    if (currentFunction->getType() && currentFunction->getType()->isFunction()) {
+        auto funcType = static_cast<LLVM::FunctionType*>(currentFunction->getType());
+        returnType = funcType->getReturnType();
+    }
+    for (size_t i = 0; i < currentFunction->getBasicBlocksCount(); ++i) {
+        auto bb = currentFunction->getBasicBlock(i);
+        if (bb->isTerminator()) continue;
+        RetInstr* retInst;
+        if (returnType->isVoid()) {
+            retInst = new RetInstr(nullptr, ensureName(bb->getName(), "ret"));
+        } else {
+            auto zero = createConstInt(returnType, 0);
+            retInst = new RetInstr(zero, ensureName(bb->getName(), "ret"));
         }
+        bb->addInstruction(retInst);
+        bb->setTerminator(true);
     }
 }
 

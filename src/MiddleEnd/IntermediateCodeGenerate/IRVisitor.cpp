@@ -40,11 +40,68 @@ ContextPtr IRContext::clone() {
     return cloned;
 }
 
+// ===== 数组初始化常量构造辅助 =====
+
+// 将常量值展平为标量 (i32) 序列: 数组常量递归展开, 标量原样保留
+static void flattenConstArray(Constant* value, std::vector<Constant*>& out) {
+    if (auto constArray = dynamic_cast<ConstantArray*>(value)) {
+        for (size_t i = 0; i < constArray->getElementsCount(); ++i) {
+            flattenConstArray(constArray->getElement(i), out);
+        }
+    } else {
+        out.push_back(value);
+    }
+}
+
+// 按数组形状从标量序列重建嵌套数组常量; 标量不足时补零 (C 语义: 部分初始化/缺行)
+// offset 为引用参数, 记录已消耗的标量个数
+static Constant* buildArrayConstantFromScalars(LLVM::ArrayType* arrayType, const std::vector<Constant*>& scalars,
+                                               size_t& offset, IRBuilder& builder, LLVMContext& ctx) {
+    auto elementType = arrayType->getElementType();
+    std::vector<Constant*> elements;
+    for (size_t i = 0; i < arrayType->getSize(); ++i) {
+        if (elementType->isArray()) {
+            elements.push_back(buildArrayConstantFromScalars(static_cast<LLVM::ArrayType*>(elementType), scalars, offset, builder, ctx));
+        } else {
+            if (offset < scalars.size()) {
+                elements.push_back(scalars[offset]);
+                offset++;
+            } else {
+                elements.push_back(dynamic_cast<Constant*>(builder.createConstInt(elementType, 0)));
+            }
+        }
+    }
+    return dynamic_cast<Constant*>(builder.createConstArray(arrayType, std::move(elements)));
+}
+
+// 在 base 指针的 indices 偏移处递归补零: 元素为数组时对每个标量子元素 store 0
+static void storeZeroElement(IRBuilder& builder, LLVMContext& ctx, Value* base, LLVM::Type* elementType,
+                             const std::vector<size_t>& indices) {
+    if (elementType->isArray()) {
+        auto arrayType = static_cast<LLVM::ArrayType*>(elementType);
+        for (size_t i = 0; i < arrayType->getSize(); ++i) {
+            auto childIndices = indices;
+            childIndices.push_back(i);
+            storeZeroElement(builder, ctx, base, arrayType->getElementType(), childIndices);
+        }
+        return;
+    }
+    std::vector<Value*> gepIndices;
+    gepIndices.push_back(builder.createConstInt(ctx.getIntegerTyImpl(32), 0));
+    for (size_t index : indices) {
+        gepIndices.push_back(builder.createConstInt(ctx.getIntegerTyImpl(32), index));
+    }
+    auto ptr = builder.createGEP(base, std::move(gepIndices));
+    builder.createStore(builder.createConstInt(elementType, 0), ptr);
+}
+
 // IRVisitor Implementation
 IRVisitor::IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx)
     : module(mod), builder(bld), llvmContext(ctx) {}
 
 IRVisitor::~IRVisitor() {
+    // 打印前确保所有函数的基本块都有终止指令 (最后一个函数还未处理)
+    builder.ensureTerminatorInCurrentFunction();
     IRPrinter printer;
     printer.printModule(module);
 }
@@ -291,19 +348,24 @@ InfoPtr IRVisitor::visitListInitializer(ListInitializer* node, ContextPtr contex
     if (irContext->getVisitPurpose() == IRContext::CREATE_GLOBAL_VARIABLE) {
         auto initializerContext = std::dynamic_pointer_cast<IRContext>(context->clone());
         initializerContext->setType(arrayType->getElementType());
-        std::vector<Constant*> constElements;
+        // 将所有子项展平为标量序列: 统一处理平铺 {1,2,3,4} / 嵌套 {{1,2},{3,4}} / 缺行 {{1,2}}
+        std::vector<Constant*> scalars;
         for (size_t i = 0; i < node->getInitializersCount(); ++i) {
             auto initializerInfo = std::dynamic_pointer_cast<IRInfo>(node->getInitializer(i)->accept(*this, initializerContext));
             if (!initializerInfo) {
                 return nullptr;
             }
-            constElements.push_back(dynamic_cast<Constant*>(initializerInfo->getValue()));
+            auto constValue = dynamic_cast<Constant*>(initializerInfo->getValue());
+            if (!constValue) {
+                std::cout << "Error: Non-constant initializer in global variable initialization.\n";
+                return nullptr;
+            }
+            flattenConstArray(constValue, scalars);
         }
-        for (size_t i = node->getInitializersCount(); i < arraySize; ++i) {
-            constElements.push_back(dynamic_cast<Constant*>(builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0)));
-        }
-
-        return std::make_shared<IRInfo>(builder.createConstArray(irContext->getType(), std::move(constElements)));
+        // 按数组形状重建; 不足部分自动补零 (C 语义: 部分初始化)
+        size_t offset = 0;
+        auto arrayConst = buildArrayConstantFromScalars(arrayType, scalars, offset, builder, llvmContext);
+        return std::make_shared<IRInfo>(arrayConst);
     } else {
         for (size_t i = 0; i < node->getInitializersCount(); ++i) {
             auto initializerContext = std::dynamic_pointer_cast<IRContext>(context->clone());
@@ -311,6 +373,10 @@ InfoPtr IRVisitor::visitListInitializer(ListInitializer* node, ContextPtr contex
             initializerContext->addIndex(i);
 
             node->getInitializer(i)->accept(*this, initializerContext);
+        }
+        // C 语义: 部分初始化时未列出的元素补零 (元素为数组时递归)
+        for (size_t i = node->getInitializersCount(); i < arraySize; ++i) {
+            storeZeroElement(builder, llvmContext, irContext->getValue(), arrayType->getElementType(), {i});
         }
         return nullptr;
     }
@@ -580,6 +646,10 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
             builder.setInsertPoint(rhsBlock);
             auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
+            if (!rhsInfo) {
+                // rhs 求值失败, 错误已由子节点记录
+                return nullptr;
+            }
             auto rhsBool = ensureBoolean(rhsInfo->getValue());
             auto rhsEndBlock = builder.getInsertBlock();
             builder.createBr(mergeBlock);
@@ -602,6 +672,10 @@ InfoPtr IRVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
 
             builder.setInsertPoint(rhsBlock);
             auto rhsInfo = std::dynamic_pointer_cast<IRInfo>(node->getRhs()->accept(*this, context));
+            if (!rhsInfo) {
+                // rhs 求值失败, 错误已由子节点记录
+                return nullptr;
+            }
             auto rhsBool = ensureBoolean(rhsInfo->getValue());
             auto rhsEndBlock = builder.getInsertBlock();
             builder.createBr(mergeBlock);
@@ -752,9 +826,7 @@ InfoPtr IRVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
 }
 
 InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
-    if (node->hasInitialDecl()) {
-        node->getInitialDecl()->accept(*this, context);
-    } else if (node->getInitial()) {
+    if (node->getInitial()) {
         node->getInitial()->accept(*this, context);
     }
 
@@ -814,7 +886,10 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
     if (node->getBody()) {
         node->getBody()->accept(*this, bodyContext);
     }
-    builder.createBr(iterBlock);
+    // body 可能以 return/break 结束 (已含终止指令), 此时不再追加跳转
+    if (!builder.getInsertBlock()->isTerminator()) {
+        builder.createBr(iterBlock);
+    }
 
     builder.setInsertPoint(iterBlock);
     if (node->getIteration()) {
@@ -881,7 +956,10 @@ InfoPtr IRVisitor::visitWhileStmt(WhileStmt* node, ContextPtr context) {
     if (node->getBody()) {
         node->getBody()->accept(*this, bodyContext);
     }
-    builder.createBr(condBlock);
+    // body 可能以 return/break 结束 (已含终止指令), 此时不再追加跳转
+    if (!builder.getInsertBlock()->isTerminator()) {
+        builder.createBr(condBlock);
+    }
 
     builder.setInsertPoint(exitBlock);
     return nullptr;
@@ -905,7 +983,10 @@ InfoPtr IRVisitor::visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) {
     if (node->getBody()) {
         node->getBody()->accept(*this, bodyContext);
     }
-    builder.createBr(condBlock);
+    // body 可能以 return/break 结束 (已含终止指令), 此时不再追加跳转
+    if (!builder.getInsertBlock()->isTerminator()) {
+        builder.createBr(condBlock);
+    }
 
     builder.setInsertPoint(condBlock);
     auto ensureBoolean = [&](Value* value) -> Value* {

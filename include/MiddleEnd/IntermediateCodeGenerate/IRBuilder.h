@@ -23,10 +23,12 @@ private:
     std::unordered_map<std::string, uint32_t> nameCounters;
 
     std::string ensureName(const std::string& prefix, const std::string& name);
-    void ensureTerminatorInCurrentFunction();
 public:
     IRBuilder(LLVMContext& context);
     ~IRBuilder();
+
+    // 确保 currentFunction 的所有基本块都有终止指令 (调用/析构/打印前)
+    void ensureTerminatorInCurrentFunction();
 
     void setInsertPoint(BasicBlock* bb);
     BasicBlock* getInsertBlock() const;

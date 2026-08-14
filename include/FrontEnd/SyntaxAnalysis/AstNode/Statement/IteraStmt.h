@@ -10,22 +10,22 @@
 
 class ForStmt : public Stmt {
 private:
-    ExpPtr initial;
-    VariableDeclPtr initialDecl; // for(int i=0; ...) 形式的初始化声明
+    // SysY 文法: ForInitStmt -> VarDecl | Exp ';'  (二选一)
+    // 声明形式: for (int i = 0; ...)  表达式形式: for (i = 0; ...)
+    // 两者语义等价: 声明的变量 i 与后续 condition/iteration/body 中的赋值引用为同一变量,
+    // 其作用域覆盖整个 for 语句(含 condition/iteration/body), 循环结束后不可见 (C 语义)
+    // 统一用 AstNodePtr 存储: Exp 和 VariableDecl 均为 AstNode 子类,
+    // accept() 虚函数分派自动转发到正确的 visit 方法, 调用方无需区分类型
+    AstNodePtr initial;
     ExpPtr condition;
     ExpPtr iteration;
     StmtPtr stmt;
 public:
     ForStmt(size_t sl);
 
-    Exp* getInitial() const;
-    ExpPtr releaseInitial();
-    void setInitial(ExpPtr s);
-
-    bool hasInitialDecl() const;
-    VariableDecl* getInitialDecl() const;
-    VariableDeclPtr releaseInitialDecl();
-    void setInitialDecl(VariableDeclPtr d);
+    AstNode* getInitial() const;
+    AstNodePtr releaseInitial();
+    void setInitial(AstNodePtr s);
 
     Exp* getCondition() const;
     ExpPtr releaseCondition();
