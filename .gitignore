@@ -1,0 +1,6 @@
+build/
+*.txt
+!tests/cases/*.sy
+!tests/cases/*.out
+!tests/cases/*.in
+!tests/cases/*.err
