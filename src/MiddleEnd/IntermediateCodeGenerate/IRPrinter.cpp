@@ -9,10 +9,6 @@ void IRPrinter::printModule(const Module& module) const {
     }
 
     os << "; 声明\n";
-    os << "declare i32 @getint()\n";
-    os << "declare void @putint(i32)\n";
-    os << "declare void @putstr(i8*)\n";
-    os << "declare void @putchar(i32)\n";
     os << "\n";
     
 
@@ -57,6 +53,21 @@ void IRPrinter::printModule(const Module& module) const {
 void IRPrinter::printFunction(const Function* func, std::ostream& os) const {
     if (!func || !func->getType() || !func->getType()->isFunction()) return;
     auto funcTy = static_cast<LLVM::FunctionType*>(func->getType());
+
+    if (func->getBasicBlocks().empty()) {
+        // 函数声明 (无函数体, 如 int getint();), 链接时由运行库提供实现
+        os << "declare " << formatType(funcTy->getReturnType()) << " @" << func->getName() << "(";
+        for (size_t i = 0; i < funcTy->getParamsCount(); ++i) {
+            if (i) os << ", ";
+            os << formatType(funcTy->getParamType(i));
+        }
+        if (funcTy->isVariadicFunc()) {
+            if (funcTy->getParamsCount()) os << ", ";
+            os << "...";
+        }
+        os << ")\n";
+        return;
+    }
 
     os << "define dso_local " << formatType(funcTy->getReturnType()) << " @" << func->getName() << "(";
     for (size_t i = 0; i < funcTy->getParamsCount(); ++i) {

@@ -1,4 +1,5 @@
+void putint(int a);
 int main() {
-    printf("hello\n");
+    putint(42);
     return 0;
 }

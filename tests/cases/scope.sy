@@ -1,9 +1,10 @@
+void putint(int a);
 int main() {
     int a = 1;
     {
         int a = 2;
-        printf("inner=%d\n", a);
+        putint(a);
     }
-    printf("outer=%d\n", a);
+    putint(a);
     return 0;
 }

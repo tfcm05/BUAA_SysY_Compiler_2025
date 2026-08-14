@@ -54,30 +54,6 @@ private:
 
 SemanticVisitor::SemanticVisitor(ClangContext& cc) : clangContext(cc), curScope(std::make_shared<SymbolTable>()) {
 
-    // build-in functions
-    {
-        auto printfType = clangContext.getFunctionTyImpl(
-            clangContext.getIntegerTyImpl(),
-            // const char*
-            std::vector<Clang::Type*>{ clangContext.getQualifiedTyImpl(clangContext.getPointerTyImpl(clangContext.getCharTyImpl()), 1) },
-            true
-        );
-        auto printfSymbol = std::make_unique<Symbol>("printf", StorageClass::NONE, printfType, Symbol::FUNCTION, nullptr);
-        curScope->addSymbol("printf", printfSymbol.get());
-        buildInSymbols.push_back(std::move(printfSymbol));
-    }
-
-    {
-        auto getintType = clangContext.getFunctionTyImpl(
-            clangContext.getIntegerTyImpl(),
-            std::vector<Clang::Type*>{},
-            false
-        );
-        auto getintSymbol = std::make_unique<Symbol>("getint", StorageClass::NONE, getintType, Symbol::FUNCTION, nullptr);
-        curScope->addSymbol("getint", getintSymbol.get());
-        buildInSymbols.push_back(std::move(getintSymbol));
-    }
-
     outputFile.open("symbol.txt");
     if (!outputFile.is_open()) {
         std::cout << "Error: Could not open symbol.txt for writing." << std::endl;
@@ -196,7 +172,9 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
         // 函数体, 不需要再创建新作用域
         auto bodyContext = std::dynamic_pointer_cast<SemanticContext>(funcContext->clone());
         bodyContext->setVisitPurpose(SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY);
-        node->getBody()->accept(*this, bodyContext);
+        if (node->getBody()) {
+            node->getBody()->accept(*this, bodyContext);
+        }
     }
     return nullptr;
 }
@@ -471,31 +449,9 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     info->setLValueFlag(false);
 
     if (funcType->isVariadic()) {
-        // printf
-        auto formatStrExp = dynamic_cast<LiteralExp*>(node->getArgument(0));
-        if (!formatStrExp || formatStrExp->getLiteralType() != LiteralExp::LiteralType::STRING) {
-            return nullptr;
-        }
-
-        std::string formatStr = formatStrExp->getStringValue();
-         int formatSpecifierCount = 0;
-        for (size_t i = 0; i < formatStr.length(); ++i) {
-            if (formatStr[i] == '%' && i + 1 < formatStr.length() && formatStr[i+1] == 'd') {
-                formatSpecifierCount++;
-                i++; // 跳过 'd'
-            }
-        }
-
-        int realArgCount = node->getArgumentsCount() - 1;
-        if (formatSpecifierCount != realArgCount) {
-            errorLog(ErrorCode::l, node->getStartLine());
-        }
-
-        for (size_t i = 1; i < node->getArgumentsCount(); ++i) {
-            node->getArgument(i)->accept(*this, context);
-        }
-
-        return info;
+        // 编译器不再内置 printf 等变参函数; SysY 不支持变参函数
+        std::cout << "Error: Variadic functions are not supported (no builtin printf).\n";
+        return nullptr;
     } 
 
     if (node->getArgumentsCount() != funcType->getParamTypesCount()) {

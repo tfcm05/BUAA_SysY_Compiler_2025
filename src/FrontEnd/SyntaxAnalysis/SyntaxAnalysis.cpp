@@ -16,12 +16,13 @@ AstNodePtr Parser::parse() {
 CompUnitPtr Parser::parseCompUnit() {
     auto node = std::make_unique<CompUnit>(CURRENT_LINE);
 
-    while (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
-        node->addVarDecl(parseVarDecl());
-    }
-
-    while (match(VOIDTK) || (match(INTTK) && match(IDENFR, 1))) {
-        node->addFuncDecl(parseFuncDecl());
+    // 交替解析任意顺序的顶层声明 (变量声明与函数声明可交错出现)
+    while (match(CONSTTK) || match(VOIDTK) || (match(INTTK) && match(IDENFR, 1))) {
+        if (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
+            node->addVarDecl(parseVarDecl());
+        } else {
+            node->addFuncDecl(parseFuncDecl());
+        }
     }
 
     node->setMainFuncDecl(parseMainFuncDecl());
@@ -200,7 +201,12 @@ FunctionDeclPtr Parser::parseFuncDecl() {
 
     functionDecl->setDeclarator(parseDeclarator());
 
-    functionDecl->setBody(parseBlockStmt());
+    if (match(SEMICN)) {
+        // 函数声明 (无函数体), 如 int getint(); 链接时由运行库提供实现
+        expect(SEMICN);
+    } else {
+        functionDecl->setBody(parseBlockStmt());
+    }
 
     return functionDecl;
 }

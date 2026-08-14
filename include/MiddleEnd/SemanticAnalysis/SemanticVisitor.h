@@ -96,7 +96,6 @@ private:
     std::ofstream outputFile;
     
     std::map<int, std::vector<std::unique_ptr<Symbol>>> symbolRecords;
-    std::vector<std::unique_ptr<Symbol>> buildInSymbols;
 
     Clang::Type* convertToType(TypeSpecifier ts, unsigned int tq);
     bool canAssign(Clang::Type* destType, Clang::Type* srcType);

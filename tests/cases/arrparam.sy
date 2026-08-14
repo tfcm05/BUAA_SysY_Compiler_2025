@@ -1,3 +1,4 @@
+void putint(int a);
 int sum(int a[], int n) {
     int s = 0;
     int i;
@@ -6,6 +7,6 @@ int sum(int a[], int n) {
 }
 int main() {
     int arr[3] = {1, 2, 3};
-    printf("s=%d\n", sum(arr, 3));
+    putint(sum(arr, 3));
     return 0;
 }

@@ -68,8 +68,6 @@ private:
     IRBuilder& builder;
     LLVMContext& llvmContext;
 
-    std::unordered_map<std::string, Function*> functionCache;
-
     std::unordered_map<Clang::Type*, LLVM::Type*> typeCache;
 
     LLVM::Type* convertType(Clang::Type* clangType);

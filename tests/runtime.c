@@ -9,7 +9,3 @@ int getint() {
 void putint(int x) {
     printf("%d", x);
 }
-
-void putstr(const char* s) {
-    printf("%s", s);
-}

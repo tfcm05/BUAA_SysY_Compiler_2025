@@ -42,27 +42,7 @@ ContextPtr IRContext::clone() {
 
 // IRVisitor Implementation
 IRVisitor::IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx)
-    : module(mod), builder(bld), llvmContext(ctx) {
-    {
-        auto putintType = llvmContext.getFunctionTyImpl(
-            llvmContext.getVoidTyImpl(),
-            std::vector<LLVM::Type*>{ llvmContext.getIntegerTyImpl(32) },
-            false
-        );
-        auto putintFunction = builder.createFunction(putintType, "putint", 1);
-        functionCache["putint"] = putintFunction;
-    }
-
-    {
-        auto putStrType = llvmContext.getFunctionTyImpl(
-            llvmContext.getVoidTyImpl(),
-            std::vector<LLVM::Type*>{ llvmContext.getPointerTyImpl(llvmContext.getIntegerTyImpl(8)) },
-            false
-        );
-        auto putStrFunction = builder.createFunction(putStrType, "putstr", 1);
-        functionCache["putstr"] = putStrFunction;
-    }
-}
+    : module(mod), builder(bld), llvmContext(ctx) {}
 
 IRVisitor::~IRVisitor() {
     IRPrinter printer;
@@ -224,7 +204,8 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
         return nullptr;
     }
     auto llvmFuncType = convertType(funcSymbol->getType());
-    auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 0);
+    // 有函数体 -> 定义(mode 0); 仅声明(如 int getint();) -> 声明(mode 1), 链接时由运行库提供
+    auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), node->getBody() ? 0 : 1);
     
     if (funcSymbol->getName() == "main") {
         module.setMainFunction(function);
@@ -234,23 +215,27 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
 
     funcSymbol->setValue(function);
 
-    auto funcDeclarator = dynamic_cast<FuncDeclarator*>(node->getDeclarator());
-    for (size_t i = 0; i < funcDeclarator->getParametersCount(); ++i) {
-        auto paramDecl = funcDeclarator->getParameter(i);
-        auto paramSymbol = paramDecl->getDeclarator()->getSymbol();
-        if (!paramSymbol) {
-            std::cout << "Error: Missing symbol for function parameter.\n";
-            continue;
+    // 仅函数定义(有函数体)需要为形参创建 Argument;
+    // 函数声明(如 int getint();)不创建, 避免在无当前函数时 createArgument 返回 nullptr 的 UB
+    if (node->getBody()) {
+        auto funcDeclarator = dynamic_cast<FuncDeclarator*>(node->getDeclarator());
+        for (size_t i = 0; i < funcDeclarator->getParametersCount(); ++i) {
+            auto paramDecl = funcDeclarator->getParameter(i);
+            auto paramSymbol = paramDecl->getDeclarator()->getSymbol();
+            if (!paramSymbol) {
+                std::cout << "Error: Missing symbol for function parameter.\n";
+                continue;
+            }
+            if (paramSymbol->getKind() != Symbol::PARAMETER) {
+                std::cout << "Error: Symbol is not of parameter kind.\n";
+                continue;
+            }
+            auto arg = builder.createArgument(convertType(paramSymbol->getType()));
+            paramSymbol->setValue(arg);
         }
-        if (paramSymbol->getKind() != Symbol::PARAMETER) {
-            std::cout << "Error: Symbol is not of parameter kind.\n";
-            continue;
-        }
-        auto arg = builder.createArgument(convertType(paramSymbol->getType()));
-        paramSymbol->setValue(arg);
-    }
 
-    node->getBody()->accept(*this, context);
+        node->getBody()->accept(*this, context);
+    }
 
     return nullptr;
 }
@@ -340,30 +325,7 @@ InfoPtr IRVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr context) {
 
     auto value = symbol->getValue();
     if (!value) {
-        // builtin functions
-        if (symbol->getKind() == Symbol::FUNCTION) {
-            if (symbol->getName() == "getint") {
-                auto getintType = llvmContext.getFunctionTyImpl(
-                    llvmContext.getIntegerTyImpl(32),
-                    std::vector<LLVM::Type*>{},
-                    false
-                );
-                auto getintFunc = builder.createFunction(getintType, "getint", 1);
-                symbol->setValue(getintFunc);
-                value = getintFunc;
-                return std::make_shared<IRInfo>(value);
-            } else if (symbol->getName() == "printf") {
-                auto printintType = llvmContext.getFunctionTyImpl(
-                    llvmContext.getIntegerTyImpl(32),
-                    std::vector<LLVM::Type*>{ llvmContext.getPointerTyImpl(llvmContext.getIntegerTyImpl(8)) },
-                    true
-                );
-                auto printintFunc = builder.createFunction(printintType, "printf", 1);
-                symbol->setValue(printintFunc);
-                value = printintFunc;
-                return std::make_shared<IRInfo>(value);
-            } 
-        }
+        // 不再内置任何函数(printf/getint/putint/putstr 均需用户在 SysY 中声明)
         std::cout << "Error: Symbol has no associated value for IR generation.\n";
         return nullptr;
     }
@@ -451,80 +413,8 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
 
     auto funcType = static_cast<LLVM::FunctionType*>(function->getType());
     if (funcType->isVariadicFunc()) {
-        // printf
-        auto printfNode = dynamic_cast<IdentifierExp*>(node->getFunction());
-        if (!printfNode || printfNode->getSymbol()->getName() != "printf") {
-            std::cout << "Error: Only 'printf' variadic function is supported.\n";
-            return nullptr;
-        }
-
-        auto formatString = dynamic_cast<LiteralExp*>(node->getArgument(0))->getStringValue();
-        // 对formatString进行转义处理
-        for (size_t i = 0; i < formatString.size(); ++i) {
-            char c = formatString[i];
-            if (c == '\\') {
-                char cNext = i + 1 < formatString.size() ? formatString[i + 1] : '\0';
-                if (cNext == 'n') {
-                    formatString[i] = '\n';
-                    formatString.erase(i + 1, 1);
-                }
-            }
-        }
-
-        // 对其他参数进行处理
-        std::vector<Value*> argValues;
-        for (size_t i = 1; i < node->getArgumentsCount(); ++i) {
-            auto argIRInfo = std::dynamic_pointer_cast<IRInfo>(node->getArgument(i)->accept(*this, context));
-            if (!argIRInfo) {
-                return nullptr;
-            }
-            auto argValue = argIRInfo->getValue();
-            argValues.push_back(argValue);
-        }
-
-        // 对formatString进行分割，创建多个常量字符串
-        std::string currentPart;
-        for (size_t i = 0; i < formatString.size(); ++i) {
-            if (formatString[i] == '%') {
-                if (i + 1 < formatString.size() && formatString[i + 1] == 'd') {
-                    if (!currentPart.empty()) {
-                        currentPart.push_back('\0');
-                        auto constStr = builder.createConstString(llvmContext.getIntegerTyImpl(8), currentPart);
-                        auto globalConstStr = builder.createGlobalVariable(llvmContext.getArrayTyImpl(llvmContext.getIntegerTyImpl(8), currentPart.size()));
-                        globalConstStr->setInitializer(dynamic_cast<Constant*>(constStr));
-                        module.addGlobalConstStr(globalConstStr);
-                        auto gepInst = builder.createGEP(globalConstStr, {
-                            builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0),
-                            builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0)
-                        });
-                        builder.createCall(functionCache["putstr"], { gepInst });
-                        currentPart.clear();
-                    }
-                    ++i; // Skip 'd'
-                    // putint
-                    builder.createCall(functionCache["putint"], { argValues.front() });
-                    argValues.erase(argValues.begin());
-                } else {
-                    currentPart += formatString[i];
-                }
-            } else {
-                currentPart += formatString[i];
-            }
-        }
-        if (!currentPart.empty()) {
-            currentPart.push_back('\0');
-            auto constStr = builder.createConstString(llvmContext.getIntegerTyImpl(8), currentPart);
-            auto globalConstStr = builder.createGlobalVariable(llvmContext.getArrayTyImpl(llvmContext.getIntegerTyImpl(8), currentPart.size()));
-            globalConstStr->setInitializer(dynamic_cast<Constant*>(constStr));
-            module.addGlobalConstStr(globalConstStr);
-            auto gepInst = builder.createGEP(globalConstStr, {
-                builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0),
-                builder.createConstInt(llvmContext.getIntegerTyImpl(32), 0)
-            });
-            builder.createCall(functionCache["putstr"], { gepInst });
-            currentPart.clear();
-        }
-
+        // 编译器不再内置 printf 等变参函数; SysY 不支持变参函数
+        std::cout << "Error: Variadic function calls are not supported (no builtin printf).\n";
         return nullptr;
     }
 

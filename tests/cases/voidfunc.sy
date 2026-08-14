@@ -1,5 +1,6 @@
+void putint(int a);
 void show(int x) {
-    printf("x=%d\n", x);
+    putint(x);
     return;
 }
 int main() {

@@ -1,6 +1,7 @@
+void putint(int a);
 const int A = 2 + 3 * 4;
 const int B = A % 5;
 int main() {
-    printf("A=%d B=%d\n", A, B);
+    putint(A * 10 + B);
     return 0;
 }

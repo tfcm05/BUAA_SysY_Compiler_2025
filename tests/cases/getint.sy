@@ -1,6 +1,8 @@
+int getint();
+void putint(int a);
 int main() {
     int a = getint();
     int b = getint();
-    printf("sum=%d\n", a + b);
+    putint(a + b);
     return 0;
 }

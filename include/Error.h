@@ -1,6 +1,8 @@
 #ifndef ERROR_H
 #define ERROR_H
 
+#include <string>
+
 typedef enum {
     a, // illegal character
     b, // declared twice
@@ -15,6 +17,8 @@ typedef enum {
 } ErrorCode;
 
 void errorLog(ErrorCode errorCode, int line);
+
+std::string errorCodeToString(ErrorCode code);
 
 void dumpErrorsToFile();
 

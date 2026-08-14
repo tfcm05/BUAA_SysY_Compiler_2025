@@ -1,6 +1,7 @@
+void putint(int a);
 int main() {
     int a = 1, b = 0;
     int r = (a && !b) || (a < b);
-    printf("r=%d\n", r);
+    putint(r);
     return 0;
 }
