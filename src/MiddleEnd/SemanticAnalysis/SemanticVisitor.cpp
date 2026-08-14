@@ -242,6 +242,19 @@ InfoPtr SemanticVisitor::visitIdentDeclarator(IdentDeclarator* node, ContextPtr 
     return info;
 }
 
+InfoPtr SemanticVisitor::visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) {
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    Clang::Type* currentType = semanticContext->getType();
+
+    // 将当前类型包装为指针类型 (如 char* = pointer to char)
+    auto ptrType = clangContext.getPointerTyImpl(currentType);
+
+    auto ptrContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    ptrContext->setType(ptrType);
+
+    return node->getPointer()->accept(*this, ptrContext);
+}
+
 InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) {
     auto constContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
@@ -316,7 +329,7 @@ InfoPtr SemanticVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr co
         }
         paramTypes.push_back(paramInfo->getType());
     }
-    currentType = clangContext.getFunctionTyImpl(currentType, paramTypes, false);
+    currentType = clangContext.getFunctionTyImpl(currentType, paramTypes, node->isVariadic());
     
     auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     funcContext->setType(currentType);
@@ -415,8 +428,9 @@ InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
             info->setConstValue(clangContext.getConstIntegerImpl(node->getNumberValue()));
         }
     } else if (node->getLiteralType() == LiteralExp::LiteralType::STRING) {
-        // const char*
-        info->setType(clangContext.getQualifiedTyImpl(clangContext.getPointerTyImpl(clangContext.getCharTyImpl()), 1));
+        // const char* = pointer to const char (C: 字符串字面量类型)
+        info->setType(clangContext.getPointerTyImpl(
+            clangContext.getQualifiedTyImpl(clangContext.getCharTyImpl(), 1)));
     }
 
     return info;
@@ -462,11 +476,38 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     info->setLValueFlag(false);
 
     if (funcType->isVariadic()) {
-        // 编译器不再内置 printf 等变参函数; SysY 不支持变参函数
-        std::cout << "Error: Variadic functions are not supported (no builtin printf).\n";
-        incrementErrorCount();
-        return nullptr;
-    } 
+        // 变参函数 (如 printf): 实参个数 >= 形参个数, 多余实参做默认类型提升
+        if (node->getArgumentsCount() < funcType->getParamTypesCount()) {
+            std::string funcName;
+            if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
+                funcName = idExp->getIdentifier();
+            }
+            errorLog(ErrorCode::d, node->getStartLine(), funcName);
+            return nullptr;
+        }
+        // 检查固定参数的类型匹配
+        for (size_t i = 0; i < funcType->getParamTypesCount(); ++i) {
+            auto argInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArgument(i)->accept(*this, context));
+            if (!argInfo) {
+                return nullptr;
+            }
+            if (!canAssign(funcType->getParamType(i), argInfo->getType())) {
+                std::string funcName;
+                if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
+                    funcName = idExp->getIdentifier();
+                }
+                errorLog(ErrorCode::e, node->getStartLine(), funcName);
+                return nullptr;
+            }
+        }
+        // 检查剩余变参实参的合法性 (expr 必须成功求值)
+        for (size_t i = funcType->getParamTypesCount(); i < node->getArgumentsCount(); ++i) {
+            if (!node->getArgument(i)->accept(*this, context)) {
+                return nullptr;
+            }
+        }
+        return info;
+    }
 
     if (node->getArgumentsCount() != funcType->getParamTypesCount()) {
         std::string funcName;
@@ -912,38 +953,47 @@ InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
 }
 
 Clang::Type* SemanticVisitor::convertToType(TypeSpecifier ts, unsigned int tq) {
+    Clang::Type* baseType = nullptr;
     if (ts == TypeSpecifier::INT) {
-        if (tq & 1U) {
-            return clangContext.getQualifiedTyImpl(clangContext.getIntegerTyImpl(), tq);
-        }
-        return clangContext.getIntegerTyImpl();
+        baseType = clangContext.getIntegerTyImpl();
+    } else if (ts == TypeSpecifier::CHAR) {
+        baseType = clangContext.getCharTyImpl();
+    } else {
+        return clangContext.getVoidTyImpl();
     }
-    return clangContext.getVoidTyImpl();
+    if (tq) {
+        return clangContext.getQualifiedTyImpl(baseType, tq);
+    }
+    return baseType;
 }
 
 bool SemanticVisitor::canAssign(Clang::Type* destType, Clang::Type* srcType) {
-    // 0. 快速路径：如果类型完全相同，则一定兼容。
+    // 0. 快速路径：如果类型完全相同，则一定兼容
     if (destType == srcType) {
         return true;
     }
-
-    // 防御性编程
     if (!destType || !srcType) {
         return false;
     }
 
-    // 1. 规则：整数类型之间的兼容
-    if (destType->isIntegerTy() && srcType->isIntegerTy()) {
+    // 1. 整数与字符类型兼容 (C: char 是小整数, int ← char 隐式转换)
+    if ((destType->isIntegerTy() || destType->isCharTy()) &&
+        (srcType->isIntegerTy() || srcType->isCharTy())) {
         return true;
     }
 
-    // 2. 规则：数组到指针的退化
+    // 2. 数组到指针的退化
     if (destType->isPointerTy() && srcType->isArrayTy()) {
         auto destPtr = static_cast<Clang::PointerType*>(destType);
         auto srcArray = static_cast<Clang::ArrayType*>(srcType);
-        
-        // 递归检查它们的元素类型是否兼容
         return canAssign(destPtr->getPointedType(), srcArray->getElementType());
+    }
+
+    // 3. 指针兼容: 去除 const 限定后比较指向类型 (C: const char* ← char*, char* ← void* 等)
+    if (destType->isPointerTy() && srcType->isPointerTy()) {
+        auto destPtr = static_cast<Clang::PointerType*>(destType);
+        auto srcPtr = static_cast<Clang::PointerType*>(srcType);
+        return canAssign(destPtr->getPointedType(), srcPtr->getPointedType());
     }
 
     return false;

@@ -100,13 +100,16 @@ void Parser::expect(TokenType expect) {
 // ----- 声明相关 -----
 DeclSpec Parser::parseDeclSpec() {
     DeclSpec declSpec = DeclSpec();
-    while (match(INTTK) || match(VOIDTK) || match(CONSTTK) || match(STATICTK)) {
+    while (match(INTTK) || match(VOIDTK) || match(CHARTK) || match(CONSTTK) || match(STATICTK)) {
         if (match(INTTK)) {
             expect(INTTK);
             declSpec.setTypeSpecifier(TypeSpecifier::INT);
         } else if (match(VOIDTK)) {
             expect(VOIDTK);
             declSpec.setTypeSpecifier(TypeSpecifier::VOID);
+        } else if (match(CHARTK)) {
+            expect(CHARTK);
+            declSpec.setTypeSpecifier(TypeSpecifier::CHAR);
         } else if (match(CONSTTK)) {
             expect(CONSTTK);
             declSpec.setTypeQualifier(TypeQualifier::CONST);
@@ -120,6 +123,13 @@ DeclSpec Parser::parseDeclSpec() {
 
 DeclaratorPtr Parser::parseDeclarator() {
     size_t startLine = CURRENT_LINE;
+
+    // 指针修饰: C 声明符中的 * (如 const char *format 中的 * 属于 format 的声明符)
+    if (match(MULT)) {
+        expect(MULT);
+        auto inner = parseDeclarator();
+        return std::make_unique<PointerDeclarator>(std::move(inner), startLine);
+    }
 
     DeclaratorPtr declarator;
     if (match(IDENFR)) {
@@ -141,14 +151,29 @@ DeclaratorPtr Parser::parseDeclarator() {
         expect(LPARENT);
         std::vector<ParameterDeclPtr> params;
         if (!match(RPARENT)) {
-            params.push_back(parseParameterDecl());
-            while (match(COMMA)) {
-                expect(COMMA);
+            bool isVariadic = false;
+            if (!match(ELLIPSIS)) {
                 params.push_back(parseParameterDecl());
+                while (match(COMMA)) {
+                    expect(COMMA);
+                    if (match(ELLIPSIS)) {
+                        isVariadic = true;
+                        break;
+                    }
+                    params.push_back(parseParameterDecl());
+                }
+            } else {
+                isVariadic = true;
             }
+            if (isVariadic) {
+                expect(ELLIPSIS);
+            }
+            expect(RPARENT);
+            declarator = std::make_unique<FuncDeclarator>(std::move(declarator), std::move(params), startLine, isVariadic);
+        } else {
+            expect(RPARENT);
+            declarator = std::make_unique<FuncDeclarator>(std::move(declarator), std::move(params), startLine, false);
         }
-        expect(RPARENT);
-        declarator = std::make_unique<FuncDeclarator>(std::move(declarator), std::move(params), startLine);
     }
 
     if (match(ASSIGN)) {

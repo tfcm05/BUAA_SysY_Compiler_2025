@@ -403,18 +403,8 @@ InfoPtr IRVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
             return std::make_shared<IRInfo>(value);
         }
         case LiteralExp::LiteralType::STRING: {
+            // 转义已在词法分析阶段处理, 追加字符串终止符
             auto string = node->getStringValue();
-            // 对字符串进行转义处理
-            for (size_t i = 0; i < string.size(); ++i) {
-                char c = string[i];
-                if (c == '\\') {
-                    char cNext = i + 1 < string.size() ? string[i + 1] : '\0';
-                    if (cNext == 'n') {
-                        string[i] = '\n';
-                        string.erase(i + 1, 1);
-                    }
-                }
-            }
             // 最后添加字符串结束符
             string.push_back('\0');
             auto value = builder.createConstString(llvmContext.getIntegerTyImpl(8), string);
@@ -459,11 +449,6 @@ InfoPtr IRVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr contex
     }
 
     auto funcType = static_cast<LLVM::FunctionType*>(function->getType());
-    if (funcType->isVariadicFunc()) {
-        // 编译器不再内置 printf 等变参函数; SysY 不支持变参函数
-        std::cout << "Error: Variadic function calls are not supported (no builtin printf).\n";
-        return nullptr;
-    }
 
     std::vector<Value*> args;
     for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
@@ -1130,6 +1115,9 @@ InfoPtr IRVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr contex
     return nullptr;
 }
 InfoPtr IRVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) {
+    return nullptr;
+}
+InfoPtr IRVisitor::visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) {
     return nullptr;
 }
 InfoPtr IRVisitor::visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) {

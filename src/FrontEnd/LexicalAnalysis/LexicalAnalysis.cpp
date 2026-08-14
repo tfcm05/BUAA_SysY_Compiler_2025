@@ -8,6 +8,7 @@ std::unordered_map<std::string, TokenType> keywords = {
     {"static", STATICTK},
     {"int", INTTK},
     {"void", VOIDTK},
+    {"char", CHARTK},
     {"if", IFTK},
     {"else", ELSETK},
     {"for", FORTK},
@@ -108,18 +109,31 @@ Token LexicalAnalysis::identifier() {
 }
 
 Token LexicalAnalysis::string() {
-    std::string string;
+    std::string str;
 
     advance(); // 跳过开头的引号
 
     while (currentChar != '"') {
-        string += currentChar;
-        advance();
+        if (currentChar == '\\') {
+            advance(); // 跳过反斜杠
+            switch (currentChar) {
+                case 'n':  str += '\n'; break;
+                case 't':  str += '\t'; break;
+                case '\\': str += '\\'; break;
+                case '"':  str += '"';  break;
+                case '0':  str += '\0';  break;
+                default:   str += '\\'; str += currentChar; break;
+            }
+            advance();
+        } else {
+            str += currentChar;
+            advance();
+        }
     }
 
     advance(); // 跳过结尾的引号
 
-    return Token(line, TokenType::STRCON, string);
+    return Token(line, TokenType::STRCON, str);
 }
 
 Token LexicalAnalysis::getNextTokenInternal() {
@@ -150,6 +164,20 @@ Token LexicalAnalysis::getNextTokenInternal() {
     // 字符串
     if (currentChar == '"') {
         return string();
+    }
+
+    // 省略号 (...)  → ELLIPSIS (用于变参函数声明如 printf)
+    if (currentChar == '.') {
+        advance();
+        if (currentChar == '.') {
+            advance();
+            if (currentChar == '.') {
+                advance();
+                return Token(line, TokenType::ELLIPSIS, "...");
+            }
+        }
+        errorLog(ErrorCode::a, line);
+        return Token(line, TokenType::ERROR, ".");
     }
 
     // 单符

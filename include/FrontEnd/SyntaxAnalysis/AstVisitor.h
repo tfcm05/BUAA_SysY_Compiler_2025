@@ -25,6 +25,7 @@ class ExpInitializer;
 class ListInitializer;
 
 class IdentDeclarator;
+class PointerDeclarator;
 class ArrayDeclarator;
 class FuncDeclarator;
 class InitialDeclarator;
@@ -82,6 +83,7 @@ public:
 
     // Declarators
     virtual InfoPtr visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) = 0;
+    virtual InfoPtr visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) = 0;
     virtual InfoPtr visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) = 0;
     virtual InfoPtr visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) = 0;
     virtual InfoPtr visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) = 0;

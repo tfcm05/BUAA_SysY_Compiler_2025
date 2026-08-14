@@ -102,6 +102,7 @@ public:
 
     // Declarators
     InfoPtr visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) override;
+    InfoPtr visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) override;
     InfoPtr visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) override;
     InfoPtr visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) override;
     InfoPtr visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) override;

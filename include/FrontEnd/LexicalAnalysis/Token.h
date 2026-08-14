@@ -8,14 +8,15 @@ typedef enum {
     IDENFR, // 标识符
     INTCON, STRCON, 
     CONSTTK, STATICTK, 
-    INTTK, VOIDTK, 
+    INTTK, VOIDTK, CHARTK, 
+    ELLIPSIS, // ...
     IFTK, ELSETK, FORTK, WHILETK, DOTK, BREAKTK, CONTINUETK, 
     RETURNTK, 
     ASSIGN, // =
     NOT, AND, OR, 
     PLUS, MINU, MULT, DIV, MOD, 
     LSS, LEQ, GRE, GEQ, EQL, NEQ, 
-    SEMICN/*;*/, COMMA/*,*/,
+    SEMICN/*;*/, COMMA/*,*/, 
     LPARENT/*(*/, RPARENT/*)*/, LBRACK/*[*/, RBRACK/*]*/, LBRACE/*{*/, RBRACE/*}*/, // 括号
     END, ERROR
 } TokenType;

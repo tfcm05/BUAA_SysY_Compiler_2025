@@ -16,6 +16,19 @@ public:
     InfoPtr accept(AstVisitor& visitor, ContextPtr context) override;
 };
 
+class PointerDeclarator : public Declarator {
+private:
+    DeclaratorPtr pointer;
+public:
+    PointerDeclarator(DeclaratorPtr ptr, size_t sl);
+
+    Declarator* getPointer() const;
+    DeclaratorPtr releasePointer();
+    void setPointer(DeclaratorPtr ptr);
+
+    InfoPtr accept(AstVisitor& visitor, ContextPtr context) override;
+};
+
 class ArrayDeclarator : public Declarator {
 private:
     DeclaratorPtr array;
@@ -39,8 +52,9 @@ class FuncDeclarator : public Declarator {
 private:
     DeclaratorPtr function;
     std::vector<ParameterDeclPtr> parameterList;
+    bool variadic;
 public:
-    FuncDeclarator(DeclaratorPtr func, std::vector<ParameterDeclPtr> params, size_t sl);
+    FuncDeclarator(DeclaratorPtr func, std::vector<ParameterDeclPtr> params, size_t sl, bool vari = false);
     
     Declarator* getFunction() const;
     DeclaratorPtr releaseFunction();
@@ -50,6 +64,8 @@ public:
     ParameterDecl* getParameter(size_t index) const;
     void addParameter(ParameterDeclPtr param);
     const std::vector<ParameterDeclPtr>& getParameters() const;
+
+    bool isVariadic() const;
 
     InfoPtr accept(AstVisitor& visitor, ContextPtr context) override;
 };

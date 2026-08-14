@@ -152,6 +152,23 @@ InfoPtr IdentDeclarator::accept(AstVisitor& visitor, ContextPtr context) {
     return visitor.visitIdentDeclarator(this, context);
 }
 
+PointerDeclarator::PointerDeclarator(DeclaratorPtr ptr, size_t sl)
+    : Declarator(sl), pointer(std::move(ptr)) {}
+
+Declarator* PointerDeclarator::getPointer() const {
+    return pointer.get();
+}
+DeclaratorPtr PointerDeclarator::releasePointer() {
+    return std::move(pointer);
+}
+void PointerDeclarator::setPointer(DeclaratorPtr ptr) {
+    pointer = std::move(ptr);
+}
+
+InfoPtr PointerDeclarator::accept(AstVisitor& visitor, ContextPtr context) {
+    return visitor.visitPointerDeclarator(this, context);
+}
+
 ArrayDeclarator::ArrayDeclarator(DeclaratorPtr arr, std::vector<ExpPtr> sizeList, size_t sl)
     : Declarator(sl), array(std::move(arr)), arraySizeList(std::move(sizeList)) {}
 
@@ -185,8 +202,8 @@ InfoPtr ArrayDeclarator::accept(AstVisitor& visitor, ContextPtr context) {
     return visitor.visitArrayDeclarator(this, context);
 }
 
-FuncDeclarator::FuncDeclarator(DeclaratorPtr func, std::vector<ParameterDeclPtr> params, size_t sl)
-    : Declarator(sl), function(std::move(func)), parameterList(std::move(params)) {}
+FuncDeclarator::FuncDeclarator(DeclaratorPtr func, std::vector<ParameterDeclPtr> params, size_t sl, bool vari)
+    : Declarator(sl), function(std::move(func)), parameterList(std::move(params)), variadic(vari) {}
 
 Declarator* FuncDeclarator::getFunction() const {
     return function.get();
@@ -212,6 +229,10 @@ void FuncDeclarator::addParameter(ParameterDeclPtr param) {
 }
 const std::vector<ParameterDeclPtr>& FuncDeclarator::getParameters() const {
     return parameterList;
+}
+
+bool FuncDeclarator::isVariadic() const {
+    return variadic;
 }
 
 InfoPtr FuncDeclarator::accept(AstVisitor& visitor, ContextPtr context) {

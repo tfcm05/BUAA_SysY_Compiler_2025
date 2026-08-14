@@ -1,6 +1,6 @@
 #ifndef DECLSPEC_H
 #define DECLSPEC_H
-enum class TypeSpecifier { VOID, INT };
+enum class TypeSpecifier { VOID, INT, CHAR };
 
 enum class StorageClass { NONE, STATIC, };
 

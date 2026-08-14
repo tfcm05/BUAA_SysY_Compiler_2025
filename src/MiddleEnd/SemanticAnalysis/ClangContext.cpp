@@ -60,6 +60,14 @@ public:
                 qualifiedTypes[std::make_pair(baseType, qualifier)] = result;
                 return result;
             }
+            case Type::CharTyID: {
+                auto newType = std::unique_ptr<CharType>(new CharType(baseType->getContext()));
+                newType->setQualifier(qualifier);
+                Type* result = newType.get();
+                ownedTypes.push_back(std::move(newType));
+                qualifiedTypes[std::make_pair(baseType, qualifier)] = result;
+                return result;
+            }
             default:
                 return nullptr;
         }

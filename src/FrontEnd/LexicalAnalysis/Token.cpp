@@ -59,6 +59,8 @@ std::string getTypeCode(TokenType tokentype) {
         case STATICTK: return "STATICTK";
         case INTTK: return "INTTK";
         case VOIDTK: return "VOIDTK";
+        case CHARTK: return "CHARTK";
+        case ELLIPSIS: return "ELLIPSIS";
         case IFTK: return "IFTK";
         case ELSETK: return "ELSETK";
         case FORTK: return "FORTK";

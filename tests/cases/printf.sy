@@ -1,0 +1,7 @@
+int printf(const char *format, ...);
+int main() {
+    printf("Hello %d\n", 42);
+    printf("%d + %d = %d\n", 3, 4, 7);
+    printf("char: %c\n", 65);
+    return 0;
+}
