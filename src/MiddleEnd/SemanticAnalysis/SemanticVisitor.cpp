@@ -83,19 +83,35 @@ SemanticVisitor::~SemanticVisitor() {
 }
 
 InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
-    // 全局变量需要计算初始化的常量表达式值
-    // (顺序保持先变量后函数: 函数体可引用全局变量; 全局初始化器若引用未声明函数, 由 visitIdentifierExp 报 c 错误)
+    // 两遍扫描: 先注册所有函数签名, 再处理变量, 最后处理函数体
+    // 这样任意顺序声明的函数都能被变量和其他函数引用
+
+    // Pass 1: 注册所有函数签名 (名字+类型, 不处理参数和函数体)
+    auto sigContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    sigContext->setVisitPurpose(SemanticContext::VisitPurpose::REGISTER_SIGNATURE);
+    for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
+        node->getFuncDecl(i)->accept(*this, sigContext);
+    }
+    // main 函数也预注册
+    if (node->getMainFuncDecl()) {
+        node->getMainFuncDecl()->accept(*this, sigContext);
+    }
+
+    // Pass 2: 处理全局变量 (初始化器的常量表达式值)
     auto globalVarContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     globalVarContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
     for (size_t i = 0; i < node->getVarDeclsCount(); ++i) {
         node->getVarDecl(i)->accept(*this, globalVarContext);
     }
-    
+
+    // Pass 3: 处理函数体 (签名已注册, 只处理参数和函数体)
     for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
         node->getFuncDecl(i)->accept(*this, context);
     }
 
-    node->getMainFuncDecl()->accept(*this, context);
+    if (node->getMainFuncDecl()) {
+        node->getMainFuncDecl()->accept(*this, context);
+    }
 
     return nullptr;
 }
@@ -107,7 +123,7 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
     bool isConstVar = node->getDeclSpec().isConst();
 
     // C 存储期判定: 全局变量 (visitCompUnit 传入 EVALUATE_CONST) 和 static 局部变量具有静态存储期
-    // 静态存储期对象的初始化器必须是常量表达式 (C 标准)
+    // 静态存储期对象的初始化器必须是常量表达式
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     bool isStaticStorage = (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST)
                            || (sc == StorageClass::STATIC);
@@ -120,8 +136,8 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
         std::shared_ptr<SemanticInfo> varInfo;
 
         // 静态存储期 (全局/static) 或 const 变量: 先尝试常量求值
-        //   全局/static: 非常量初始化器 → 报错 (C 语义)
-        //   局部 const: 非常量初始化器 → 回退普通求值 (C: const 是只读限定符, 非编译期常量)
+        //   全局/static: 非常量初始化器 → 报错
+        //   局部 const: 非常量初始化器 → 回退普通求值
         if (isStaticStorage || isConstVar) {
             auto constContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
             constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
@@ -168,26 +184,37 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
 
 InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
     auto sc = node->getDeclSpec().getStorageClass();
-
     auto retType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
-    
-    // 处理函数名和类型, 参数不需要创建符号
-    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    funcContext->setType(retType);
-    auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, funcContext));
-    if (!funcInfo) {
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+
+    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::REGISTER_SIGNATURE) {
+        // 预注册: 只注册函数名和类型, 不处理参数和函数体
+        auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+        funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
+        funcContext->setType(retType);
+        auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, funcContext));
+        if (!funcInfo) {
+            return nullptr;
+        }
+        auto existingSymbol = curScope->lookup(funcInfo->getName());
+        if (existingSymbol && existingSymbol->getKind() == Symbol::FUNCTION) {
+            // 函数已注册 (原型+定义或多个原型): C 允许, 复用已有符号
+            node->getDeclarator()->setSymbol(existingSymbol);
+        } else if (existingSymbol) {
+            // 已存在但不是函数 → 名字冲突
+            errorLog(ErrorCode::RedefinedName, node->getStartLine(), funcInfo->getName());
+        } else {
+            auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
+            node->getDeclarator()->setSymbol(symbol);
+        }
         return nullptr;
     }
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-   
-    if (curScope->existInCurScope(funcInfo->getName())) {
-        errorLog(ErrorCode::RedefinedName, node->getStartLine(), funcInfo->getName());
-    } else {
-        auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
-        // 将Symbol信息存储到Declarator中
-        node->getDeclarator()->setSymbol(symbol);
-    }
+    // 主处理: 签名已在预注册中完成, 只处理参数和函数体
+    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    funcContext->setType(retType);
+    // 重新访问 declarator 以获取函数类型信息 (但不再注册符号)
+    node->getDeclarator()->accept(*this, funcContext);
 
     // 新作用域
     {
@@ -198,7 +225,7 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
         paramContext->setVisitPurpose(SemanticContext::VisitPurpose::GENERATE_SYMBOL);
         node->getDeclarator()->accept(*this, paramContext);
 
-        // 函数体, 不需要再创建新作用域
+        // 函数体
         auto bodyContext = std::dynamic_pointer_cast<SemanticContext>(funcContext->clone());
         bodyContext->setVisitPurpose(SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY);
         if (node->getBody()) {
@@ -250,7 +277,7 @@ InfoPtr SemanticVisitor::visitPointerDeclarator(PointerDeclarator* node, Context
     auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     Clang::Type* currentType = semanticContext->getType();
 
-    // 将当前类型包装为指针类型 (如 char* = pointer to char)
+    // 将当前类型包装为指针类型
     auto ptrType = clangContext.getPointerTyImpl(currentType);
 
     auto ptrContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
@@ -432,7 +459,7 @@ InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
             info->setConstValue(clangContext.getConstIntegerImpl(node->getNumberValue()));
         }
     } else if (node->getLiteralType() == LiteralExp::LiteralType::STRING) {
-        // const char* = pointer to const char (C: 字符串字面量类型)
+        // const char* = pointer to const char
         info->setType(clangContext.getPointerTyImpl(
             clangContext.getQualifiedTyImpl(clangContext.getCharTyImpl(), 1)));
     }
@@ -484,7 +511,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
     info->setLValueFlag(false);
 
     if (funcType->isVariadic()) {
-        // 变参函数 (如 printf): 实参个数 >= 形参个数, 多余实参做默认类型提升
+        // 变参函数: 实参个数 >= 形参个数, 多余实参做默认类型提升
         if (node->getArgumentsCount() < funcType->getParamTypesCount()) {
             std::string funcName;
             if (auto idExp = dynamic_cast<IdentifierExp*>(node->getFunction())) {
@@ -685,7 +712,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         }
         auto lhsIntValue = static_cast<Clang::ConstInteger*>(lhsConstValue)->getIntValue();
 
-        // 短路求值: && 左侧为 0 / || 左侧非 0 时无需求右侧 (C 语义, 也避免 0 && (1/0) 除零)
+        // 短路求值: && 左侧为 0 / || 左侧非 0 时无需求右侧
         if (node->getBinaryOp() == BinaryExp::BinaryOp::AND && lhsIntValue == 0) {
             info->setConstValue(clangContext.getConstIntegerImpl(0));
             return info;
@@ -706,7 +733,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         }
         auto rhsIntValue = static_cast<Clang::ConstInteger*>(rhsConstValue)->getIntValue();
 
-        // 编译期可检出的除零/模零 (C 语义: 除零为 UB, 编译器报错而非崩溃)
+        // 编译期可检出的除零/模零
         if ((node->getBinaryOp() == BinaryExp::BinaryOp::DIV || node->getBinaryOp() == BinaryExp::BinaryOp::MOD) && rhsIntValue == 0) {
             errorLog(ErrorCode::ConstDivByZero, node->getStartLine());
             return nullptr;
@@ -814,7 +841,7 @@ InfoPtr SemanticVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
-    // for 头声明的变量作用域覆盖整个 for 语句 (C/SysY 语义)
+    // for 头声明的变量作用域覆盖整个 for 语句
     ScopeGuard guard(curScope);
     if (node->getInitial()) {
         node->getInitial()->accept(*this, context);
@@ -897,7 +924,7 @@ InfoPtr SemanticVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
 
     if (node->getReturnExp()) {
         node->getReturnExp()->accept(*this, context);
-        // C 语义: void 函数不得 return 表达式
+        // void 函数不得 return 表达式
         if (returnType->isVoidTy()) {
             errorLog(ErrorCode::ReturnTypeMismatch, node->getStartLine());
         }
@@ -908,7 +935,7 @@ InfoPtr SemanticVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
     return nullptr;
 }
 
-// 判断语句是否保证以 return 结束 (缺 return 分析, 对应 C 的 always-return 判定):
+// 判断语句是否保证以 return 结束
 //   return 语句 → true; if 带 else 且两分支都保证 → true; 块语句最后一条保证 → true; 其余 false
 static bool alwaysReturns(AstNode* node) {
     if (auto retStmt = dynamic_cast<ReturnStmt*>(node)) {
@@ -984,7 +1011,7 @@ bool SemanticVisitor::canAssign(Clang::Type* destType, Clang::Type* srcType) {
         return false;
     }
 
-    // 1. 整数与字符类型兼容 (C: char 是小整数, int ← char 隐式转换)
+    // 1. 整数与字符类型兼容
     if ((destType->isIntegerTy() || destType->isCharTy()) &&
         (srcType->isIntegerTy() || srcType->isCharTy())) {
         return true;
@@ -997,7 +1024,7 @@ bool SemanticVisitor::canAssign(Clang::Type* destType, Clang::Type* srcType) {
         return canAssign(destPtr->getPointedType(), srcArray->getElementType());
     }
 
-    // 3. 指针兼容: 去除 const 限定后比较指向类型 (C: const char* ← char*, char* ← void* 等)
+    // 3. 指针兼容: 去除 const 限定后比较指向类型
     if (destType->isPointerTy() && srcType->isPointerTy()) {
         auto destPtr = static_cast<Clang::PointerType*>(destType);
         auto srcPtr = static_cast<Clang::PointerType*>(srcType);

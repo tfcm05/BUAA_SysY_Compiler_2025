@@ -17,15 +17,16 @@ CompUnitPtr Parser::parseCompUnit() {
     auto node = std::make_unique<CompUnit>(CURRENT_LINE);
 
     // 交替解析任意顺序的顶层声明 (变量声明与函数声明可交错出现)
-    while (match(CONSTTK) || match(VOIDTK) || (match(INTTK) && match(IDENFR, 1))) {
-        if (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
+    // main 可出现在任意位置 (int main)
+    while (match(CONSTTK) || match(VOIDTK) || (match(INTTK) && (match(MAINTK, 1) || match(IDENFR, 1)))) {
+        if (match(INTTK) && match(MAINTK, 1)) {
+            node->setMainFuncDecl(parseMainFuncDecl());
+        } else if (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
             node->addVarDecl(parseVarDecl());
         } else {
             node->addFuncDecl(parseFuncDecl());
         }
     }
-
-    node->setMainFuncDecl(parseMainFuncDecl());
 
     return node;
 }

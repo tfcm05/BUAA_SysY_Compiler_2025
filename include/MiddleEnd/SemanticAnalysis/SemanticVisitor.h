@@ -49,7 +49,10 @@ public:
         EVALUATE_CONST,    // 检查表达式是否为编译期常量，并求其值
 
         // 语句相关
-        RESOLVE_FUNCTION_BODY_ONLY // 只解析函数体，不创建新作用域
+        RESOLVE_FUNCTION_BODY_ONLY, // 只解析函数体，不创建新作用域
+
+        // 声明预处理
+        REGISTER_SIGNATURE          // 只注册函数签名(名字+类型), 不处理参数和函数体
     };
 private:
     VisitPurpose purpose;

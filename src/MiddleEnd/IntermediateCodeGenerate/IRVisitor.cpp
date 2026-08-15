@@ -157,17 +157,35 @@ LLVM::Type* IRVisitor::convertType(Clang::Type* clangType) {
 }
 
 InfoPtr IRVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
+    // 两遍扫描: 先创建所有函数对象, 再处理全局变量, 最后生成函数体
+    // 这样任意顺序的函数前向引用都能正确解析
+
+    // Pass 1: 创建所有函数对象 (不含函数体)
+    auto funcSigContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+    funcSigContext->setVisitPurpose(IRContext::CREATE_FUNCTION);
+    for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
+        node->getFuncDecl(i)->accept(*this, funcSigContext);
+    }
+    // main 函数也预创建
+    if (node->getMainFuncDecl()) {
+        node->getMainFuncDecl()->accept(*this, funcSigContext);
+    }
+
+    // Pass 2: 全局变量
     auto globalVarContext = std::dynamic_pointer_cast<IRContext>(context->clone());
     globalVarContext->setVisitPurpose(IRContext::CREATE_GLOBAL_VARIABLE);
     for (size_t i = 0; i < node->getVarDeclsCount(); ++i) {
         node->getVarDecl(i)->accept(*this, globalVarContext);
     }
 
+    // Pass 3: 生成函数体
     for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
         node->getFuncDecl(i)->accept(*this, context);
     }
 
-    node->getMainFuncDecl()->accept(*this, context);
+    if (node->getMainFuncDecl()) {
+        node->getMainFuncDecl()->accept(*this, context);
+    }
 
     return nullptr;
 }
@@ -237,29 +255,60 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
     if (funcSymbol->getKind() != Symbol::FUNCTION) {
         return nullptr;
     }
-    auto llvmFuncType = convertType(funcSymbol->getType());
-    // 有函数体 -> 定义(mode 0); 仅声明(如 int getint();) -> 声明(mode 1), 链接时由运行库提供
-    auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), node->getBody() ? 0 : 1);
-    
-    if (funcSymbol->getName() == "main") {
-        module.setMainFunction(function);
-    } else {
-        module.addFunction(function);
+    auto irContext = std::dynamic_pointer_cast<IRContext>(context);
+
+    // 预创建模式: 只创建 Function 对象 (mode 1 声明), 不生成函数体
+    if (irContext->getVisitPurpose() == IRContext::CREATE_FUNCTION) {
+        // 如果符号已有 value, 跳过 (避免重复创建)
+        if (funcSymbol->getValue()) {
+                    return nullptr;
+        }
+        auto llvmFuncType = convertType(funcSymbol->getType());
+        auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 1); // mode 1 = declaration
+        if (funcSymbol->getName() == "main") {
+            module.setMainFunction(function);
+        } else {
+            module.addFunction(function);
+        }
+        funcSymbol->setValue(function);
+        return nullptr;
     }
 
-    funcSymbol->setValue(function);
+    auto llvmFuncType = convertType(funcSymbol->getType());
+    auto existingFunction = dynamic_cast<Function*>(funcSymbol->getValue());
 
-    // 仅函数定义(有函数体)需要为形参创建 Argument;
-    // 函数声明(如 int getint();)不创建, 避免在无当前函数时 createArgument 返回 nullptr 的 UB
     if (node->getBody()) {
+        // 有函数体: 需要从声明升级为定义
+        // 先确保上一个函数的终止指令完好
+        builder.ensureTerminatorInCurrentFunction();
+
+        // 创建入口基本块
+        auto entryBB = new BasicBlock(funcSymbol->getName() + ".entry");
+        Function* function = nullptr;
+
+        if (existingFunction) {
+            // 预创建的函数: 复用已有 Function 对象, 添加基本块
+            existingFunction->addBasicBlock(entryBB);
+                    builder.setInsertFunction(existingFunction);
+            builder.setInsertPoint(entryBB);
+            function = existingFunction;
+        } else {
+            // 未预创建: 正常创建
+            function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 0);
+            if (funcSymbol->getName() == "main") {
+                module.setMainFunction(function);
+            } else {
+                module.addFunction(function);
+            }
+            funcSymbol->setValue(function);
+        }
+
+        // 为形参创建 Argument
         auto funcDeclarator = dynamic_cast<FuncDeclarator*>(node->getDeclarator());
         for (size_t i = 0; i < funcDeclarator->getParametersCount(); ++i) {
             auto paramDecl = funcDeclarator->getParameter(i);
             auto paramSymbol = paramDecl->getDeclarator()->getSymbol();
-            if (!paramSymbol) {
-                continue;
-            }
-            if (paramSymbol->getKind() != Symbol::PARAMETER) {
+            if (!paramSymbol || paramSymbol->getKind() != Symbol::PARAMETER) {
                 continue;
             }
             auto arg = builder.createArgument(convertType(paramSymbol->getType()));
@@ -267,6 +316,17 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
         }
 
         node->getBody()->accept(*this, context);
+    } else {
+        // 无函数体: 声明函数, 预创建已处理
+        if (!existingFunction) {
+            auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 1);
+            if (funcSymbol->getName() == "main") {
+                module.setMainFunction(function);
+            } else {
+                module.addFunction(function);
+            }
+            funcSymbol->setValue(function);
+        }
     }
 
     return nullptr;
