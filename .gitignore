@@ -1,5 +1,7 @@
 build/
 *.txt
+*.s
+*.log
 !tests/cases/*.sy
 !tests/cases/*.out
 !tests/cases/*.in
