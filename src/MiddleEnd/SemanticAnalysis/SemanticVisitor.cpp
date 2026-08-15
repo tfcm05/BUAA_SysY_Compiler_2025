@@ -83,34 +83,18 @@ SemanticVisitor::~SemanticVisitor() {
 }
 
 InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
-    // 两遍扫描: 先注册所有函数签名, 再处理变量, 最后处理函数体
-    // 这样任意顺序声明的函数都能被变量和其他函数引用
+    // 单遍扫描: 按源码顺序处理
+    auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    varContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
+    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
 
-    // Pass 1: 注册所有函数签名 (名字+类型, 不处理参数和函数体)
-    auto sigContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    sigContext->setVisitPurpose(SemanticContext::VisitPurpose::REGISTER_SIGNATURE);
-    for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
-        node->getFuncDecl(i)->accept(*this, sigContext);
-    }
-    // main 函数也预注册
-    if (node->getMainFuncDecl()) {
-        node->getMainFuncDecl()->accept(*this, sigContext);
-    }
-
-    // Pass 2: 处理全局变量 (初始化器的常量表达式值)
-    auto globalVarContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    globalVarContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
-    for (size_t i = 0; i < node->getVarDeclsCount(); ++i) {
-        node->getVarDecl(i)->accept(*this, globalVarContext);
-    }
-
-    // Pass 3: 处理函数体 (签名已注册, 只处理参数和函数体)
-    for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
-        node->getFuncDecl(i)->accept(*this, context);
-    }
-
-    if (node->getMainFuncDecl()) {
-        node->getMainFuncDecl()->accept(*this, context);
+    for (size_t i = 0; i < node->getDeclCount(); ++i) {
+        if (auto varDecl = dynamic_cast<VariableDecl*>(node->getDecl(i))) {
+            varDecl->accept(*this, varContext);
+        } else if (auto funcDecl = dynamic_cast<FunctionDecl*>(node->getDecl(i))) {
+            funcDecl->accept(*this, funcContext);
+        }
     }
 
     return nullptr;
@@ -118,13 +102,13 @@ InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
 
 InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
     auto sc = node->getDeclSpec().getStorageClass();
+    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
 
     auto varType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
     bool isConstVar = node->getDeclSpec().isConst();
 
     // C 存储期判定: 全局变量 (visitCompUnit 传入 EVALUATE_CONST) 和 static 局部变量具有静态存储期
     // 静态存储期对象的初始化器必须是常量表达式
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
     bool isStaticStorage = (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST)
                            || (sc == StorageClass::STATIC);
 
@@ -185,39 +169,33 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
 InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
     auto sc = node->getDeclSpec().getStorageClass();
     auto retType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
 
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::REGISTER_SIGNATURE) {
-        // 预注册: 只注册函数名和类型, 不处理参数和函数体
-        auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-        funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
-        funcContext->setType(retType);
-        auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, funcContext));
-        if (!funcInfo) {
-            return nullptr;
-        }
-        auto existingSymbol = curScope->lookup(funcInfo->getName());
-        if (existingSymbol && existingSymbol->getKind() == Symbol::FUNCTION) {
-            // 函数已注册 (原型+定义或多个原型): C 允许, 复用已有符号
-            node->getDeclarator()->setSymbol(existingSymbol);
-        } else if (existingSymbol) {
-            // 已存在但不是函数 → 名字冲突
-            errorLog(ErrorCode::RedefinedName, node->getStartLine(), funcInfo->getName());
-        } else {
-            auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
-            node->getDeclarator()->setSymbol(symbol);
-        }
+    // 访问 declarator 获取函数类型 (参数以 DEFAULT 模式访问, 不创建符号)
+    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    funcContext->setType(retType);
+    funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
+    auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, funcContext));
+    if (!funcInfo) {
         return nullptr;
     }
 
-    // 主处理: 签名已在预注册中完成, 只处理参数和函数体
-    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    funcContext->setType(retType);
-    // 重新访问 declarator 以获取函数类型信息 (但不再注册符号)
-    node->getDeclarator()->accept(*this, funcContext);
+    // 注册函数符号
+    // 允许重复声明, 重复定义由链接器报错
+    auto existingSymbol = curScope->lookup(funcInfo->getName());
+    if (existingSymbol && existingSymbol->getKind() == Symbol::FUNCTION) {
+        // 已有函数声明/定义: 复用已有符号
+        node->getDeclarator()->setSymbol(existingSymbol);
+    } else if (existingSymbol) {
+        // 已存在但不是函数 → 名字冲突
+        errorLog(ErrorCode::RedefinedName, node->getStartLine(), funcInfo->getName());
+        return nullptr;
+    } else {
+        auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
+        node->getDeclarator()->setSymbol(symbol);
+    }
 
-    // 新作用域
-    {
+    // 有函数体: 处理参数符号和函数体
+    if (node->getBody()) {
         ScopeGuard guard(curScope);
 
         // 参数, 需要创建符号
@@ -228,10 +206,9 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
         // 函数体
         auto bodyContext = std::dynamic_pointer_cast<SemanticContext>(funcContext->clone());
         bodyContext->setVisitPurpose(SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY);
-        if (node->getBody()) {
-            node->getBody()->accept(*this, bodyContext);
-        }
+        node->getBody()->accept(*this, bodyContext);
     }
+
     return nullptr;
 }
 

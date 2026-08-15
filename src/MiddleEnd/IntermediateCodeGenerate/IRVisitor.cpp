@@ -157,40 +157,26 @@ LLVM::Type* IRVisitor::convertType(Clang::Type* clangType) {
 }
 
 InfoPtr IRVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
-    // 两遍扫描: 先创建所有函数对象, 再处理全局变量, 最后生成函数体
-    // 这样任意顺序的函数前向引用都能正确解析
+    // 单遍扫描: 按源码顺序处理
+    auto varContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+    varContext->setVisitPurpose(IRContext::CREATE_GLOBAL_VARIABLE);
+    auto funcContext = std::dynamic_pointer_cast<IRContext>(context->clone());
+    funcContext->setVisitPurpose(IRContext::DEFAULT);
 
-    // Pass 1: 创建所有函数对象 (不含函数体)
-    auto funcSigContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-    funcSigContext->setVisitPurpose(IRContext::CREATE_FUNCTION);
-    for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
-        node->getFuncDecl(i)->accept(*this, funcSigContext);
-    }
-    // main 函数也预创建
-    if (node->getMainFuncDecl()) {
-        node->getMainFuncDecl()->accept(*this, funcSigContext);
-    }
-
-    // Pass 2: 全局变量
-    auto globalVarContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-    globalVarContext->setVisitPurpose(IRContext::CREATE_GLOBAL_VARIABLE);
-    for (size_t i = 0; i < node->getVarDeclsCount(); ++i) {
-        node->getVarDecl(i)->accept(*this, globalVarContext);
-    }
-
-    // Pass 3: 生成函数体
-    for (size_t i = 0; i < node->getFuncDeclsCount(); ++i) {
-        node->getFuncDecl(i)->accept(*this, context);
-    }
-
-    if (node->getMainFuncDecl()) {
-        node->getMainFuncDecl()->accept(*this, context);
+    for (size_t i = 0; i < node->getDeclCount(); ++i) {
+        if (auto varDecl = dynamic_cast<VariableDecl*>(node->getDecl(i))) {
+            varDecl->accept(*this, varContext);
+        } else if (auto funcDecl = dynamic_cast<FunctionDecl*>(node->getDecl(i))) {
+            funcDecl->accept(*this, funcContext);
+        }
     }
 
     return nullptr;
 }
 
 InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
+    auto irContext = std::dynamic_pointer_cast<IRContext>(context);
+
     for (size_t i = 0; i < node->getDeclaratorsCount(); ++i) {
         auto declarator = node->getDeclarator(i);
         auto symbol = declarator->getSymbol();
@@ -202,7 +188,6 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
         }
         auto llvmType = convertType(symbol->getType());
 
-        auto irContext = std::dynamic_pointer_cast<IRContext>(context);
         // 全局和 static 都用全局变量实现 (C: static 具有静态存储期), 区别仅在初始化上下文
         bool isGlobalVar = (irContext->getVisitPurpose() == IRContext::CREATE_GLOBAL_VARIABLE) || symbol->isStatic();
         if (isGlobalVar) {
@@ -255,46 +240,22 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
     if (funcSymbol->getKind() != Symbol::FUNCTION) {
         return nullptr;
     }
-    auto irContext = std::dynamic_pointer_cast<IRContext>(context);
-
-    // 预创建模式: 只创建 Function 对象 (mode 1 声明), 不生成函数体
-    if (irContext->getVisitPurpose() == IRContext::CREATE_FUNCTION) {
-        // 如果符号已有 value, 跳过 (避免重复创建)
-        if (funcSymbol->getValue()) {
-                    return nullptr;
-        }
-        auto llvmFuncType = convertType(funcSymbol->getType());
-        auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 1); // mode 1 = declaration
-        if (funcSymbol->getName() == "main") {
-            module.setMainFunction(function);
-        } else {
-            module.addFunction(function);
-        }
-        funcSymbol->setValue(function);
-        return nullptr;
-    }
 
     auto llvmFuncType = convertType(funcSymbol->getType());
     auto existingFunction = dynamic_cast<Function*>(funcSymbol->getValue());
 
     if (node->getBody()) {
-        // 有函数体: 需要从声明升级为定义
-        // 先确保上一个函数的终止指令完好
+        // 有函数体: 创建函数定义
         builder.ensureTerminatorInCurrentFunction();
 
-        // 创建入口基本块
-        auto entryBB = new BasicBlock(funcSymbol->getName() + ".entry");
-        Function* function = nullptr;
-
         if (existingFunction) {
-            // 预创建的函数: 复用已有 Function 对象, 添加基本块
+            // 前面已有原型声明 (mode 1): 复用已有 Function 对象, 添加入口基本块
+            auto entryBB = new BasicBlock(funcSymbol->getName() + ".entry");
             existingFunction->addBasicBlock(entryBB);
-                    builder.setInsertFunction(existingFunction);
+            builder.setInsertFunction(existingFunction);
             builder.setInsertPoint(entryBB);
-            function = existingFunction;
         } else {
-            // 未预创建: 正常创建
-            function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 0);
+            auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 0);
             if (funcSymbol->getName() == "main") {
                 module.setMainFunction(function);
             } else {
@@ -317,7 +278,7 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
 
         node->getBody()->accept(*this, context);
     } else {
-        // 无函数体: 声明函数, 预创建已处理
+        // 无函数体: 声明函数 (如 int getint();)
         if (!existingFunction) {
             auto function = builder.createFunction(llvmFuncType, funcSymbol->getName(), 1);
             if (funcSymbol->getName() == "main") {

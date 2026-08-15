@@ -25,13 +25,9 @@ public:
 class IRContext : public Context {
 public:
     enum visitPurpose {
-        DEFAULT, // 默认
-
+        DEFAULT,               // 默认
         CREATE_GLOBAL_VARIABLE, // 全局变量
-
-        USE_LOCATION_VALUE, // 左值
-
-        CREATE_FUNCTION,      // 只创建 Function 对象 (无函数体)
+        USE_LOCATION_VALUE,   // 左值
     };
 private:
     visitPurpose purpose;

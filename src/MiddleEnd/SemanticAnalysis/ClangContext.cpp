@@ -41,8 +41,6 @@ public:
     // 使用 unique_ptr 的 vector 来自动管理所有动态分配的类型的内存
     std::vector<std::unique_ptr<Type>> ownedTypes;
 
-
-
     // const 整数的缓存
     std::unordered_map<int64_t, ConstInteger*> constIntegerValues;
 

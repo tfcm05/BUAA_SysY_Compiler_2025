@@ -20,11 +20,11 @@ CompUnitPtr Parser::parseCompUnit() {
     // main 可出现在任意位置 (int main)
     while (match(CONSTTK) || match(VOIDTK) || (match(INTTK) && (match(MAINTK, 1) || match(IDENFR, 1)))) {
         if (match(INTTK) && match(MAINTK, 1)) {
-            node->setMainFuncDecl(parseMainFuncDecl());
+            node->addDecl(parseMainFuncDecl());
         } else if (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
-            node->addVarDecl(parseVarDecl());
+            node->addDecl(parseVarDecl());
         } else {
-            node->addFuncDecl(parseFuncDecl());
+            node->addDecl(parseFuncDecl());
         }
     }
 
@@ -790,16 +790,9 @@ void Parser::parserLog(const AstNode* root) const {
             // ===== Declarations =====
             if (auto cu = dynamic_cast<const CompUnit*>(node)) {
                 ofs << indentFn(lvl) << "CompUnit\n";
-                ofs << indentFn(lvl+1) << "VarDecls:\n";
-                for (size_t i = 0; i < cu->getVarDeclsCount(); ++i) {
-                    printNode(cu->getVarDecl(i), lvl+2);
+                for (size_t i = 0; i < cu->getDeclCount(); ++i) {
+                    printNode(cu->getDecl(i), lvl+2);
                 }
-                ofs << indentFn(lvl+1) << "FuncDecls:\n";
-                for (size_t i = 0; i < cu->getFuncDeclsCount(); ++i) {
-                    printNode(cu->getFuncDecl(i), lvl+2);
-                }
-                ofs << indentFn(lvl+1) << "Main:\n";
-                printNode(cu->getMainFuncDecl(), lvl+2);
                 return;
             }
             if (auto vds = dynamic_cast<const VariableDecl*>(node)) {
