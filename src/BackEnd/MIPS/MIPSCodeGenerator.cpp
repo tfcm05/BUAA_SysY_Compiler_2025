@@ -83,23 +83,44 @@ void MIPSPrinter::print(const MIPSModule& module, std::ostream& os) const {
 }
 
 // ============================================================
-// MIPSCodeGenerator
+// MIPSCodeGenerator: 常量判断
+// ============================================================
+bool MIPSCodeGenerator::isConstantIntVal(const Value* v, int64_t& out) {
+    if (v && v->isConstantInt()) {
+        out = static_cast<const ConstantInt*>(v)->getValue();
+        return true;
+    }
+    return false;
+}
+
+// ============================================================
+// MIPSCodeGenerator: 入口
 // ============================================================
 std::unique_ptr<MIPSModule> MIPSCodeGenerator::run() {
     mipsModule = std::make_unique<MIPSModule>();
 
-    // 1. 生成数据段 (全局变量 + 字符串常量)
+    // 1. 数据段 (全局变量 + 字符串常量)
     generateGlobalVariables();
     generateStringConstants();
 
-    // 2. 为每个函数分配栈帧
+    // 2. 为每个函数分配栈帧 (main 单独存放于 MainFunction)
     for (const auto* func : module.getFunctions()) {
-        allocateFrame(const_cast<Function*>(func));
+        if (func->getBasicBlocksCount() > 0) {  // 跳过外部声明
+            allocateFrame(const_cast<Function*>(func));
+        }
+    }
+    if (auto* mainFunc = module.getMainFunction()) {
+        allocateFrame(mainFunc);
     }
 
-    // 3. 生成代码段
+    // 3. 代码段
     for (const auto* func : module.getFunctions()) {
-        generateFunction(const_cast<Function*>(func));
+        if (func->getBasicBlocksCount() > 0) {  // 外部声明由运行库提供
+            generateFunction(const_cast<Function*>(func));
+        }
+    }
+    if (auto* mainFunc = module.getMainFunction()) {
+        generateFunction(mainFunc);
     }
 
     return std::move(mipsModule);
@@ -108,34 +129,68 @@ std::unique_ptr<MIPSModule> MIPSCodeGenerator::run() {
 // ============================================================
 // 数据段生成
 // ============================================================
+void MIPSCodeGenerator::collectGlobalWords(const Constant* c,
+                                           std::vector<int64_t>& out) const {
+    if (!c) return;
+    if (c->isConstantInt()) {
+        out.push_back(static_cast<const ConstantInt*>(c)->getValue());
+    } else if (c->isConstantArray()) {
+        auto* ca = static_cast<const ConstantArray*>(c);
+        for (size_t i = 0; i < ca->getElementsCount(); ++i) {
+            collectGlobalWords(ca->getElement(i), out);
+        }
+    }
+}
+
 void MIPSCodeGenerator::generateGlobalVariables() {
     for (const auto* gv : module.getGlobalVariables()) {
-        std::string label = getGlobalLabel(const_cast<GlobalVariable*>(gv));
+        std::string label = getGlobalLabel(gv);
+        LLVM::Type* pointedType =
+            static_cast<LLVM::PointerType*>(gv->getType())->getPointedType();
 
-        // 根据初始化器类型生成
         const auto* init = gv->getInitializer();
         if (!init) {
             // 未初始化: .space
-            size_t size = getTypeSize(gv->getType());
-            mipsModule->addDataEntry({label, ".space", std::to_string(size)});
+            mipsModule->addDataEntry(
+                {label, ".space", std::to_string(getTypeSize(pointedType))});
             continue;
         }
 
         if (init->isConstantInt()) {
-            // 整数全局变量: .word
+            // 标量整数: .word
             int64_t val = static_cast<const ConstantInt*>(init)->getValue();
             mipsModule->addDataEntry({label, ".word", std::to_string(val)});
-        } else {
-            // 数组或其他: .space (简化)
-            size_t size = getTypeSize(gv->getType());
-            mipsModule->addDataEntry({label, ".space", std::to_string(size)});
+            continue;
         }
+
+        if (init->isConstantArray()) {
+            // 数组: 展开为 .word / .byte 列表 (元素全部为常量时)
+            std::vector<int64_t> elems;
+            collectGlobalWords(init, elems);
+            bool isByte = pointedType && pointedType->isArray() &&
+                          isI8Type(static_cast<LLVM::ArrayType*>(pointedType)
+                                       ->getElementType());
+            if (!elems.empty()) {
+                std::string v;
+                for (size_t i = 0; i < elems.size(); ++i) {
+                    if (i) v += ", ";
+                    v += std::to_string(elems[i]);
+                }
+                mipsModule->addDataEntry(
+                    {label, isByte ? ".byte" : ".word", v});
+                continue;
+            }
+        }
+
+        // 其他情况: .space
+        mipsModule->addDataEntry(
+            {label, ".space", std::to_string(getTypeSize(pointedType))});
     }
 }
 
 void MIPSCodeGenerator::generateStringConstants() {
     for (const auto* gv : module.getGlobalConstStrs()) {
-        std::string label = getGlobalLabel(const_cast<GlobalVariable*>(gv));
+        std::string label = getGlobalLabel(gv);
         const auto* init = gv->getInitializer();
         if (init && init->isConstString()) {
             std::string str = static_cast<const ConstString*>(init)->getString();
@@ -151,7 +206,8 @@ void MIPSCodeGenerator::generateStringConstants() {
                 default:   escaped += c; break;
                 }
             }
-            mipsModule->addDataEntry({label, ".asciiz", "\"" + escaped + "\"", true});
+            mipsModule->addDataEntry(
+                {label, ".asciiz", "\"" + escaped + "\"", true});
         }
     }
 }
@@ -163,205 +219,350 @@ void MIPSCodeGenerator::allocateFrame(Function* func) {
     FrameInfo info;
     info.nextOffset = 8;  // 0: $ra, 4: $fp_saved
 
-    // 为参数分配栈槽
+    // 参数
     for (size_t i = 0; i < func->getArgumentsCount(); ++i) {
         Argument* arg = func->getArgument(i);
         info.valueOffset[arg] = info.nextOffset;
         info.nextOffset += 4;
     }
 
-    // 为所有指令的结果分配栈槽
+    // 指令结果 (store/br/ret 无结果不分配; alloca 按内容区大小分配)
     for (size_t i = 0; i < func->getBasicBlocksCount(); ++i) {
         BasicBlock* bb = func->getBasicBlock(i);
         for (size_t j = 0; j < bb->getInstructionsCount(); ++j) {
             Instruction* instr = bb->getInstruction(j);
-            // 所有 Instruction 都是 Value, 都可能被其他指令引用
+            if (instr->isTerminator()) continue;  // br / ret
+            if (dynamic_cast<StoreInst*>(instr)) continue;
+            if (auto* call = dynamic_cast<CallInstr*>(instr)) {
+                if (call->getType() && call->getType()->isVoid()) continue;
+            }
+            if (auto* alloca = dynamic_cast<AllocaInst*>(instr)) {
+                // alloca 栈槽即内容区
+                size_t sz = getTypeSize(
+                    static_cast<LLVM::PointerType*>(alloca->getType())
+                        ->getPointedType());
+                sz = (sz + 3) / 4 * 4;
+                info.valueOffset[alloca] = info.nextOffset;
+                info.nextOffset += static_cast<int>(sz);
+                continue;
+            }
             info.valueOffset[instr] = info.nextOffset;
-            info.nextOffset += 4;  // 简化: 每个值 4 字节
+            info.nextOffset += 4;
         }
     }
 
-    // 栈帧大小对齐到 8 字节
-    info.frameSize = ((info.nextOffset + 4 + 7) / 8) * 8;  // +4 for alignment padding
+    // 对齐到 8 字节
+    info.frameSize = ((info.nextOffset + 7) / 8) * 8;
     frameMap[func] = info;
 
-    // 为 BB 生成标签
+    // BB 标签
     for (size_t i = 0; i < func->getBasicBlocksCount(); ++i) {
         BasicBlock* bb = func->getBasicBlock(i);
         bbLabels[bb] = getFuncLabel(func) + "." + bb->getName();
     }
 }
 
-int MIPSCodeGenerator::getOffset(const Value* val, Function* func) {
-    auto& info = frameMap[func];
-    auto it = info.valueOffset.find(val);
-    if (it != info.valueOffset.end()) {
-        return it->second;
-    }
-    return 0;  // 不应发生
+int MIPSCodeGenerator::getOffset(const Value* val) const {
+    auto it = frameMap.find(currentFunc);
+    if (it == frameMap.end()) return 0;
+    auto vit = it->second.valueOffset.find(val);
+    if (vit == it->second.valueOffset.end()) return 0;
+    return vit->second;
 }
 
-std::string MIPSCodeGenerator::getBBLabel(BasicBlock* bb) {
-    return bbLabels[bb];
+bool MIPSCodeGenerator::hasStackSlot(const Value* val) const {
+    auto it = frameMap.find(currentFunc);
+    if (it == frameMap.end()) return false;
+    return it->second.valueOffset.count(val) != 0;
 }
 
-std::string MIPSCodeGenerator::getFuncLabel(Function* func) {
+std::string MIPSCodeGenerator::getBBLabel(BasicBlock* bb) const {
+    auto it = bbLabels.find(bb);
+    return it != bbLabels.end() ? it->second : std::string();
+}
+
+std::string MIPSCodeGenerator::getFuncLabel(const Function* func) const {
     return func->getName();
 }
 
-std::string MIPSCodeGenerator::getGlobalLabel(GlobalVariable* gv) {
+std::string MIPSCodeGenerator::getGlobalLabel(const GlobalVariable* gv) const {
     return gv->getName();
 }
 
-size_t MIPSCodeGenerator::getTypeSize(LLVM::Type* type) {
+size_t MIPSCodeGenerator::getTypeSize(LLVM::Type* type) const {
     if (!type) return 0;
     switch (type->getTypeID()) {
     case LLVM::Type::VoidTyID:   return 0;
-    case LLVM::Type::IntegerTyID: return 4;  // i32 or i8 (简化)
-    case LLVM::Type::PointerTyID: return 4;   // 32 位指针
+    case LLVM::Type::IntegerTyID: {
+        auto* intType = static_cast<LLVM::IntegerType*>(type);
+        return intType->getBitWidth() == 8 ? 1 : 4;
+    }
+    case LLVM::Type::PointerTyID: return 4;
     case LLVM::Type::ArrayTyID: {
         auto* arrType = static_cast<LLVM::ArrayType*>(type);
         return arrType->getSize() * getTypeSize(arrType->getElementType());
     }
-    case LLVM::Type::FunctionTyID: return 4;  // 函数指针
-    default: return 4;
+    case LLVM::Type::FunctionTyID: return 4;
     }
+    return 4;
 }
 
-int MIPSCodeGenerator::getElementSize(LLVM::Type* type) {
-    if (!type) return 4;
-    switch (type->getTypeID()) {
-    case LLVM::Type::IntegerTyID: {
-        auto* intType = static_cast<LLVM::IntegerType*>(type);
-        // i8 = 1 byte, i32 = 4 bytes
-        return intType->getBitWidth() == 8 ? 1 : 4;
+// GEP 剥掉一层
+LLVM::Type* MIPSCodeGenerator::gepAdvance(LLVM::Type* cur) const {
+    if (!cur) return nullptr;
+    if (cur->isArray()) {
+        return static_cast<LLVM::ArrayType*>(cur)->getElementType();
     }
-    case LLVM::Type::PointerTyID: return 4;
-    case LLVM::Type::ArrayTyID:
-    case LLVM::Type::VoidTyID:
-    case LLVM::Type::FunctionTyID:
-    default: return 4;
+    if (cur->isPointer()) {
+        return static_cast<LLVM::PointerType*>(cur)->getPointedType();
     }
+    return cur;
+}
+
+bool MIPSCodeGenerator::isI8Type(LLVM::Type* type) const {
+    return type && type->isInteger() &&
+           static_cast<LLVM::IntegerType*>(type)->getBitWidth() == 8;
 }
 
 // ============================================================
-// 值加载与存储
+// 寄存器缓存 (BB 级)
 // ============================================================
-void MIPSCodeGenerator::loadValue(MIPSFunction* mipsFunc, const Value* val,
-                                   MReg dst, Function* func) {
+MReg MIPSCodeGenerator::allocReg(const std::set<MReg>& avoid) {
+    // 1. 空闲寄存器
+    for (int i = 0; i < NUM_T_REGS; ++i) {
+        MReg r = static_cast<MReg>(static_cast<int>(MReg::T0) + i);
+        if (!regBusy[i] && !avoid.count(r)) {
+            regBusy[i] = true;
+            return r;
+        }
+    }
+    // 2. 全部占用: 淘汰一个非 avoid 的寄存器
+    for (int i = 0; i < NUM_T_REGS; ++i) {
+        MReg r = static_cast<MReg>(static_cast<int>(MReg::T0) + i);
+        if (avoid.count(r)) continue;
+        auto it = regOwner.find(r);
+        if (it != regOwner.end()) {
+            // 缓存项: 写回栈帧
+            const Value* v = it->second;
+            if (hasStackSlot(v)) {
+                emitInstr(MIPSInstr(
+                    "sw", {r, MIPSOperand(getOffset(v), MReg(MReg::Fp))},
+                    "spill " + v->getName()));
+            }
+            regCache.erase(v);
+            regOwner.erase(it);
+        }
+        regBusy[i] = true;
+        return r;
+    }
+    // 3. 不可达 (avoid 集合至多 3 个, 寄存器 8 个)
+    return MReg::T0;
+}
+
+void MIPSCodeGenerator::flushRegCache() {
+    for (auto& [val, reg] : regCache) {
+        if (hasStackSlot(val)) {
+            emitInstr(MIPSInstr(
+                "sw", {reg, MIPSOperand(getOffset(val), MReg(MReg::Fp))},
+                "flush " + val->getName()));
+        }
+    }
+    regCache.clear();
+    regOwner.clear();
+    for (int i = 0; i < NUM_T_REGS; ++i) regBusy[i] = false;
+}
+
+void MIPSCodeGenerator::cacheResult(const Value* val, MReg reg) {
+    // reg 已有其他 owner: 先写回旧值
+    auto it = regOwner.find(reg);
+    if (it != regOwner.end() && it->second != val) {
+        const Value* oldVal = it->second;
+        if (hasStackSlot(oldVal)) {
+            emitInstr(MIPSInstr(
+                "sw", {reg, MIPSOperand(getOffset(oldVal), MReg(MReg::Fp))},
+                "spill " + oldVal->getName()));
+        }
+        regCache.erase(oldVal);
+    }
+    // val 已映射到其他寄存器: 移除旧映射 (旧寄存器值未变, 无需写回)
+    auto vit = regCache.find(val);
+    if (vit != regCache.end() && vit->second != reg) {
+        regOwner.erase(vit->second);
+    }
+    regCache[val] = reg;
+    regOwner[reg] = val;
+    if (isTReg(reg)) regBusy[regIndex(reg)] = true;
+}
+
+void MIPSCodeGenerator::loadValueInto(const Value* val, MReg reg,
+                                      bool isAddress) {
     if (!val) {
-        mipsFunc->addInstr(MIPSInstr("li", {MReg(0)}, "null value"));
+        emitInstr(MIPSInstr("li", {reg, MIPSOperand(0)}));
         return;
     }
-
     if (val->isConstantInt()) {
         int64_t imm = static_cast<const ConstantInt*>(val)->getValue();
-        mipsFunc->addInstr(MIPSInstr("li", {MReg(dst), MIPSOperand(imm)}));
+        emitInstr(MIPSInstr("li", {reg, MIPSOperand(imm)}));
         return;
     }
-
-    if (val->isBasicBlock()) {
-        // BB 作为跳转目标
+    if (dynamic_cast<const AllocaInst*>(val)) {
+        // alloca 的值即内容区地址 = fp + offset
+        emitInstr(MIPSInstr("addiu",
+                            {reg, MReg(MReg::Fp),
+                             MIPSOperand(getOffset(val))}));
         return;
     }
-
+    if (val->isGlobalVariable()) {
+        auto* gv = const_cast<GlobalVariable*>(
+            static_cast<const GlobalVariable*>(val));
+        if (isAddress) {
+            emitInstr(MIPSInstr("la", {reg, MIPSOperand(getGlobalLabel(gv))}));
+        } else {
+            emitInstr(MIPSInstr("la", {reg, MIPSOperand(getGlobalLabel(gv))}));
+            emitInstr(MIPSInstr("lw", {reg, MIPSOperand(0, reg)}));
+        }
+        return;
+    }
     if (val->isFunction()) {
-        auto* callee = const_cast<Function*>(static_cast<const Function*>(val));
-        mipsFunc->addInstr(MIPSInstr("la", {MReg(dst),
-            MIPSOperand(getFuncLabel(callee))}));
+        auto* fn = const_cast<Function*>(static_cast<const Function*>(val));
+        emitInstr(MIPSInstr("la", {reg, MIPSOperand(getFuncLabel(fn))}));
         return;
     }
-
-    // 从栈帧加载
-    int offset = getOffset(val, func);
-    mipsFunc->addInstr(MIPSInstr("lw", {MReg(dst),
-        MIPSOperand(offset, MReg(Fp))}));
+    if (val->isBasicBlock()) {
+        auto* bb = const_cast<BasicBlock*>(static_cast<const BasicBlock*>(val));
+        emitInstr(MIPSInstr("la", {reg, MIPSOperand(getBBLabel(bb))}));
+        return;
+    }
+    // 栈帧加载
+    emitInstr(MIPSInstr("lw",
+                        {reg, MIPSOperand(getOffset(val), MReg(MReg::Fp))}));
 }
 
-void MIPSCodeGenerator::storeValue(MIPSFunction* mipsFunc, MReg src,
-                                     const Value* val, Function* func) {
-    if (!val) return;
+MReg MIPSCodeGenerator::loadValue(const Value* val,
+                                  const std::set<MReg>& avoid) {
+    // 缓存命中
+    auto it = regCache.find(val);
+    if (it != regCache.end()) return it->second;
 
-    if (val->isGlobalVariable()) {
-        auto* gv = const_cast<GlobalVariable*>(static_cast<const GlobalVariable*>(val));
-        std::string label = getGlobalLabel(gv);
-        mipsFunc->addInstr(MIPSInstr("la", {MReg(T2), MIPSOperand(label)}));
-        mipsFunc->addInstr(MIPSInstr("sw", {MReg(src),
-            MIPSOperand(0, MReg(T2))}));
-        return;
-    }
+    MReg reg = allocReg(avoid);
+    loadValueInto(val, reg, false);
 
-    int offset = getOffset(val, func);
-    mipsFunc->addInstr(MIPSInstr("sw", {MReg(src),
-        MIPSOperand(offset, MReg(Fp))}));
+    // 仅对有栈槽的指令结果/参数进行缓存;
+    // 常量/全局/函数/BB/alloca 每次按需重新计算
+    bool cacheable = val && !val->isConstantInt() && !val->isGlobalVariable() &&
+                     !val->isFunction() && !val->isBasicBlock() &&
+                     !dynamic_cast<const AllocaInst*>(val);
+    if (cacheable) cacheResult(val, reg);
+    return reg;
 }
 
-void MIPSCodeGenerator::loadAddress(MIPSFunction* mipsFunc, const Value* val,
-                                      MReg dst, Function* func) {
-    if (val->isGlobalVariable()) {
-        auto* gv = const_cast<GlobalVariable*>(static_cast<const GlobalVariable*>(val));
-        mipsFunc->addInstr(MIPSInstr("la", {MReg(dst),
-            MIPSOperand(getGlobalLabel(gv))}));
-        return;
+MReg MIPSCodeGenerator::loadValue(const Value* val, MReg dst) {
+    // 缓存命中: move 到 dst
+    auto it = regCache.find(val);
+    if (it != regCache.end()) {
+        if (it->second != dst) {
+            emitInstr(MIPSInstr("move", {dst, it->second}));
+        }
+        return dst;
     }
+    loadValueInto(val, dst, false);
+    return dst;
+}
 
-    // 局部变量的栈地址
-    int offset = getOffset(val, func);
-    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(dst),
-        MReg(Fp), MIPSOperand(offset)}));
+MReg MIPSCodeGenerator::loadAddress(const Value* val,
+                                    const std::set<MReg>& avoid) {
+    auto it = regCache.find(val);
+    if (it != regCache.end()) return it->second;
+    if (val && val->isGlobalVariable()) {
+        MReg reg = allocReg(avoid);
+        loadValueInto(val, reg, true);  // la
+        return reg;
+    }
+    // 其他 (alloca / GEP 结果 / 参数指针): 值即地址
+    return loadValue(val, avoid);
 }
 
 // ============================================================
 // 函数生成
 // ============================================================
+void MIPSCodeGenerator::emitEpilogue(MIPSFunction* mipsFunc, int frameSize) {
+    mipsFunc->addInstr(MIPSInstr::makeComment("=== epilogue ==="));
+    mipsFunc->addInstr(MIPSInstr("lw", {MReg(MReg::Ra),
+        MIPSOperand(0, MReg(MReg::Fp))}));
+    mipsFunc->addInstr(MIPSInstr("lw", {MReg(MReg::T8),
+        MIPSOperand(4, MReg(MReg::Fp))}));
+    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(MReg::Sp),
+        MReg(MReg::Fp), MIPSOperand(frameSize)}));
+    mipsFunc->addInstr(MIPSInstr("move", {MReg(MReg::Fp),
+        MReg(MReg::T8)}));
+    mipsFunc->addInstr(MIPSInstr("jr", {MReg(MReg::Ra)}));
+}
+
 void MIPSCodeGenerator::generateFunction(Function* func) {
+    if (func->getBasicBlocksCount() == 0) return;  // 外部声明, 不生成定义
+    currentFunc = func;
     auto* mipsFunc = new MIPSFunction(getFuncLabel(func));
+    curMipsFunc = mipsFunc;
     const auto& info = frameMap[func];
+    int frameSize = info.frameSize;
 
     // ---- Prologue ----
     mipsFunc->addInstr(MIPSInstr::makeComment("=== prologue ==="));
-    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(Sp), MReg(Sp),
-        MIPSOperand(-info.frameSize)}));
-    mipsFunc->addInstr(MIPSInstr("sw", {MReg(Ra),
-        MIPSOperand(0, MReg(Sp))}));
-    mipsFunc->addInstr(MIPSInstr("sw", {MReg(Fp),
-        MIPSOperand(4, MReg(Sp))}));
-    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(Fp), MReg(Sp),
-        MIPSOperand(info.frameSize)}));
+    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(MReg::Sp), MReg(MReg::Sp),
+        MIPSOperand(-frameSize)}));
+    // 保存旧 fp (t8 为 caller-saved, prologue 中可自由使用)
+    mipsFunc->addInstr(MIPSInstr("move", {MReg(MReg::T8), MReg(MReg::Fp)}));
+    mipsFunc->addInstr(MIPSInstr("move", {MReg(MReg::Fp), MReg(MReg::Sp)}));
+    mipsFunc->addInstr(MIPSInstr("sw", {MReg(MReg::Ra),
+        MIPSOperand(0, MReg(MReg::Fp))}));
+    mipsFunc->addInstr(MIPSInstr("sw", {MReg(MReg::T8),
+        MIPSOperand(4, MReg(MReg::Fp))}));
 
-    // 将参数从 $a0-$a3 存到栈帧
-    for (size_t i = 0; i < func->getArgumentsCount() && i < 4; ++i) {
+    // ---- 参数: 前 4 个来自 $a0-$a3, 其余从调用者栈帧读取 ----
+    for (size_t i = 0; i < func->getArgumentsCount(); ++i) {
         Argument* arg = func->getArgument(i);
-        MReg argReg = static_cast<MReg>(static_cast<int>(MReg::A0) + i);
-        int offset = getOffset(arg, func);
-        mipsFunc->addInstr(MIPSInstr("sw", {MReg(argReg),
-            MIPSOperand(offset, MReg(Fp))}));
-    }
-    // 超过 4 个参数: 从调用者的栈帧获取 (简化: 暂不支持)
-
-    // ---- 生成基本块 ----
-    for (size_t i = 0; i < func->getBasicBlocksCount(); ++i) {
-        BasicBlock* bb = func->getBasicBlock(i);
-        generateBasicBlock(mipsFunc, bb);
-    }
-
-    // ---- Epilogue (保底) ----
-    // 如果最后一条不是 ret, 加一个默认 epilogue
-    if (!func->getBasicBlocks().empty()) {
-        auto* lastBB = func->getBasicBlock(func->getBasicBlocksCount() - 1);
-        if (!lastBB->isTerminator() || lastBB->getInstructionsCount() == 0) {
-            mipsFunc->addInstr(MIPSInstr::makeComment("=== default epilogue ==="));
-            mipsFunc->addInstr(MIPSInstr("lw", {MReg(Ra),
-                MIPSOperand(0, MReg(Fp))}));
-            mipsFunc->addInstr(MIPSInstr("lw", {MReg(Fp),
-                MIPSOperand(4, MReg(Fp))}));
-            // 注意: sp 恢复需要在 fp 恢复前用 fp 计算
-            // sp = fp + frameSize - frameSize = fp (原始) ... 简化处理
-            mipsFunc->addInstr(MIPSInstr("addiu", {MReg(Sp), MReg(Fp),
-                MIPSOperand(info.frameSize)}));
-            mipsFunc->addInstr(MIPSInstr("jr", {MReg(Ra)}));
+        int off = getOffset(arg);
+        if (i < 4) {
+            MReg argReg =
+                static_cast<MReg>(static_cast<int>(MReg::A0) + i);
+            mipsFunc->addInstr(MIPSInstr("sw", {argReg,
+                MIPSOperand(off, MReg(MReg::Fp))}));
+        } else {
+            // 第 i 个参数 (i>=4) 在调用者栈: fp + frameSize + 16 + 4*(i-4)
+            int64_t srcOff = frameSize + 16 + 4 * (int64_t)(i - 4);
+            mipsFunc->addInstr(MIPSInstr("lw", {MReg(MReg::T8),
+                MIPSOperand((int)srcOff, MReg(MReg::Fp))}));
+            mipsFunc->addInstr(MIPSInstr("sw", {MReg(MReg::T8),
+                MIPSOperand(off, MReg(MReg::Fp))}));
         }
     }
+
+    // ---- Phi 消除分析 ----
+    collectPhiCopies(func);
+
+    // ---- 基本块 ----
+    for (size_t i = 0; i < func->getBasicBlocksCount(); ++i) {
+        generateBasicBlock(mipsFunc, func->getBasicBlock(i));
+    }
+
+    // ---- 保底 epilogue (最后 BB 不以 ret 结尾) ----
+    bool lastIsRet = false;
+    if (func->getBasicBlocksCount() > 0) {
+        BasicBlock* lastBB = func->getBasicBlock(func->getBasicBlocksCount() - 1);
+        if (lastBB->getInstructionsCount() > 0) {
+            Instruction* last =
+                lastBB->getInstruction(lastBB->getInstructionsCount() - 1);
+            if (dynamic_cast<RetInstr*>(last)) lastIsRet = true;
+        }
+    }
+    if (!lastIsRet) {
+        emitEpilogue(mipsFunc, frameSize);
+    }
+
+    // 清空生成状态
+    flushRegCache();
+    curMipsFunc = nullptr;
+    currentFunc = nullptr;
 
     mipsModule->addFunction(mipsFunc);
 }
@@ -369,33 +570,51 @@ void MIPSCodeGenerator::generateFunction(Function* func) {
 // ============================================================
 // 基本块生成
 // ============================================================
-void MIPSCodeGenerator::generateBasicBlock(MIPSFunction* mipsFunc, BasicBlock* bb) {
-    // BB 标签
+void MIPSCodeGenerator::generateBasicBlock(MIPSFunction* mipsFunc,
+                                           BasicBlock* bb) {
     mipsFunc->addInstr(MIPSInstr::makeLabel(getBBLabel(bb)));
 
-    // 逐条指令生成
+    // 1. 生成非 terminator 指令 (跳过 Phi)
+    Instruction* terminator = nullptr;
     for (size_t i = 0; i < bb->getInstructionsCount(); ++i) {
         Instruction* instr = bb->getInstruction(i);
+        if (instr->isTerminator()) {
+            terminator = instr;
+            break;
+        }
+        if (dynamic_cast<PhiInstr*>(instr)) continue;
         generateInstruction(mipsFunc, instr);
     }
+
+    // 2. Phi 消除: 本 BB 作为前驱时, 在 terminator 前把 incoming 值写入 phi 栈槽
+    auto it = phiCopies.find(bb);
+    if (it != phiCopies.end()) {
+        for (auto& [phiResult, incomingVal] : it->second) {
+            MReg reg = loadValue(incomingVal);
+            emitInstr(MIPSInstr("sw", {reg,
+                MIPSOperand(getOffset(phiResult), MReg(MReg::Fp))},
+                "phi copy"));
+        }
+    }
+
+    // 3. BB 结束: 清空寄存器缓存 (所有值写回栈帧)
+    flushRegCache();
+
+    // 4. terminator
+    if (terminator) generateInstruction(mipsFunc, terminator);
+
+    // 5. terminator 可能加载/缓存条件值, 清空保证 BB 边界缓存干净
+    flushRegCache();
 }
 
 // ============================================================
 // 指令分派
 // ============================================================
-void MIPSCodeGenerator::generateInstruction(MIPSFunction* mipsFunc, Instruction* instr) {
-    // 根据 ValueKind 分派
-    // Instruction 子类: AddInstr, SubInstr, MulInstr, SdivInstr,
-    //   AndInstr, OrInstr, IcmpInstr, ZextInstr, BrInstr, PhiInstr,
-    //   RetInstr, CallInstr, AllocaInst, LoadInst, StoreInst, GetElementPtrInst
-
-    // 算术逻辑指令 (都有 getLHS/getRHS)
-    if (dynamic_cast<AddInstr*>(instr) ||
-        dynamic_cast<SubInstr*>(instr) ||
-        dynamic_cast<MulInstr*>(instr) ||
-        dynamic_cast<SdivInstr*>(instr) ||
-        dynamic_cast<AndInstr*>(instr) ||
-        dynamic_cast<OrInstr*>(instr)) {
+void MIPSCodeGenerator::generateInstruction(MIPSFunction* mipsFunc,
+                                            Instruction* instr) {
+    if (dynamic_cast<AddInstr*>(instr) || dynamic_cast<SubInstr*>(instr) ||
+        dynamic_cast<MulInstr*>(instr) || dynamic_cast<SdivInstr*>(instr) ||
+        dynamic_cast<AndInstr*>(instr) || dynamic_cast<OrInstr*>(instr)) {
         genArithmetic(mipsFunc, instr);
     } else if (auto* icmp = dynamic_cast<IcmpInstr*>(instr)) {
         genIcmp(mipsFunc, icmp);
@@ -415,8 +634,6 @@ void MIPSCodeGenerator::generateInstruction(MIPSFunction* mipsFunc, Instruction*
         genGEP(mipsFunc, gep);
     } else if (auto* zext = dynamic_cast<ZextInstr*>(instr)) {
         genZext(mipsFunc, zext);
-    } else if (auto* phi = dynamic_cast<PhiInstr*>(instr)) {
-        genPhi(mipsFunc, phi);
     } else {
         mipsFunc->addInstr(MIPSInstr::makeComment(
             "TODO: unhandled instruction type"));
@@ -426,11 +643,13 @@ void MIPSCodeGenerator::generateInstruction(MIPSFunction* mipsFunc, Instruction*
 // ============================================================
 // 算术逻辑指令
 // ============================================================
-void MIPSCodeGenerator::genArithmetic(MIPSFunction* mipsFunc, Instruction* instr) {
-    // 获取操作数 (所有算术指令都有 getLHS/getRHS)
+void MIPSCodeGenerator::genArithmetic(MIPSFunction* mipsFunc,
+                                      Instruction* instr) {
+    (void)mipsFunc;
     Value* lhs = nullptr;
     Value* rhs = nullptr;
     const char* mnem = nullptr;
+    bool isDiv = false;
 
     if (auto* a = dynamic_cast<AddInstr*>(instr)) {
         lhs = a->getLHS(); rhs = a->getRHS(); mnem = "add";
@@ -439,7 +658,7 @@ void MIPSCodeGenerator::genArithmetic(MIPSFunction* mipsFunc, Instruction* instr
     } else if (auto* a = dynamic_cast<MulInstr*>(instr)) {
         lhs = a->getLHS(); rhs = a->getRHS(); mnem = "mul";
     } else if (auto* a = dynamic_cast<SdivInstr*>(instr)) {
-        lhs = a->getLHS(); rhs = a->getRHS(); mnem = "div";
+        lhs = a->getLHS(); rhs = a->getRHS(); mnem = "div"; isDiv = true;
     } else if (auto* a = dynamic_cast<AndInstr*>(instr)) {
         lhs = a->getLHS(); rhs = a->getRHS(); mnem = "and";
     } else if (auto* a = dynamic_cast<OrInstr*>(instr)) {
@@ -448,113 +667,109 @@ void MIPSCodeGenerator::genArithmetic(MIPSFunction* mipsFunc, Instruction* instr
         return;
     }
 
-    // 获取当前函数 (通过栈帧信息反查 — 简化: 使用第一个包含该 instr 的函数)
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) {
-            func = f;
-            break;
+    int64_t rhsImm = 0;
+    bool rhsConst = isConstantIntVal(rhs, rhsImm);
+    int64_t lhsImm = 0;
+    bool lhsConst = isConstantIntVal(lhs, lhsImm);
+
+    // 可交换运算: 常量放右侧以利用立即数指令
+    bool commutative = (std::string(mnem) == "add" ||
+                        std::string(mnem) == "mul" ||
+                        std::string(mnem) == "and" ||
+                        std::string(mnem) == "or");
+    if (commutative && !rhsConst && lhsConst) {
+        std::swap(lhs, rhs);
+        rhsConst = isConstantIntVal(rhs, rhsImm);
+    }
+
+    // 立即数优化: add->addi, sub->addiu(负值), and->andi, or->ori
+    bool immOpt = false;
+    const char* immMnem = nullptr;
+    int64_t immVal = 0;
+    if (!isDiv && rhsConst) {
+        if (std::string(mnem) == "add" && isSmallImm(rhsImm)) {
+            immOpt = true; immMnem = "addi"; immVal = rhsImm;
+        } else if (std::string(mnem) == "sub" && isSmallImm(-rhsImm)) {
+            immOpt = true; immMnem = "addiu"; immVal = -rhsImm;
+        } else if (std::string(mnem) == "and" && isUnsignedImm16(rhsImm)) {
+            immOpt = true; immMnem = "andi"; immVal = rhsImm;
+        } else if (std::string(mnem) == "or" && isUnsignedImm16(rhsImm)) {
+            immOpt = true; immMnem = "ori"; immVal = rhsImm;
         }
     }
-    if (!func) return;
 
-    // 加载操作数到 $t0, $t1
-    loadValue(mipsFunc, lhs, MReg(T0), func);
-    loadValue(mipsFunc, rhs, MReg(T1), func);
-
-    // 生成指令
-    if (strcmp(mnem, "div") == 0) {
-        // MIPS div: 结果在 LO 寄存器, 用 mflo 取出
-        mipsFunc->addInstr(MIPSInstr("div", {MReg(T0), MReg(T1)},
-            "div $t0 / $t1"));
-        mipsFunc->addInstr(MIPSInstr("mflo", {MReg(T2)}));
-    } else {
-        mipsFunc->addInstr(MIPSInstr(mnem,
-            {MReg(T2), MReg(T0), MReg(T1)}));
+    if (immOpt) {
+        MReg lhsReg = loadValue(lhs);
+        MReg rd = allocReg({lhsReg});
+        emitInstr(MIPSInstr(immMnem, {rd, lhsReg, MIPSOperand(immVal)}));
+        cacheResult(instr, rd);
+        return;
     }
 
-    // 存储结果
-    storeValue(mipsFunc, MReg(T2), instr, func);
+    MReg lhsReg = loadValue(lhs);
+    MReg rhsReg = loadValue(rhs, std::set<MReg>{lhsReg});
+    MReg rd = allocReg({lhsReg, rhsReg});
+    if (isDiv) {
+        emitInstr(MIPSInstr("div", {lhsReg, rhsReg}, "div " + lhs->getName() +
+                                                        " / " + rhs->getName()));
+        emitInstr(MIPSInstr("mflo", {rd}));
+    } else {
+        emitInstr(MIPSInstr(mnem, {rd, lhsReg, rhsReg}));
+    }
+    cacheResult(instr, rd);
 }
 
 // ============================================================
 // Icmp 指令
 // ============================================================
 void MIPSCodeGenerator::genIcmp(MIPSFunction* mipsFunc, IcmpInstr* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
-    }
-    if (!func) return;
+    (void)mipsFunc;
+    MReg lhsReg = loadValue(instr->getLHS());
+    MReg rhsReg = loadValue(instr->getRHS(), std::set<MReg>{lhsReg});
+    MReg rd = allocReg({lhsReg, rhsReg});
 
-    loadValue(mipsFunc, instr->getLHS(), MReg(T0), func);
-    loadValue(mipsFunc, instr->getRHS(), MReg(T1), func);
-
-    // icmp 结果: 0 (false) 或 1 (true)
-    // slt $t2, $t0, $t1  → $t2 = ($t0 < $t1) ? 1 : 0
-    std::string op;
     switch (instr->getPredicate()) {
     case IcmpInstr::IcmpOp::EQ:
-        mipsFunc->addInstr(MIPSInstr("xor", {MReg(T2), MReg(T0),
-            MReg(T1)}));
-        mipsFunc->addInstr(MIPSInstr("sltiu", {MReg(T2), MReg(T2),
-            MIPSOperand(1)}));
+        emitInstr(MIPSInstr("xor", {rd, lhsReg, rhsReg}));
+        emitInstr(MIPSInstr("sltiu", {rd, rd, MIPSOperand(1)}));
         break;
     case IcmpInstr::IcmpOp::NE:
-        mipsFunc->addInstr(MIPSInstr("xor", {MReg(T2), MReg(T0),
-            MReg(T1)}));
-        mipsFunc->addInstr(MIPSInstr("sltu", {MReg(T2), MReg(Zero),
-            MReg(T2)}));
+        emitInstr(MIPSInstr("xor", {rd, lhsReg, rhsReg}));
+        emitInstr(MIPSInstr("sltu", {rd, MReg(MReg::Zero), rd}));
         break;
     case IcmpInstr::IcmpOp::SLT:
-        mipsFunc->addInstr(MIPSInstr("slt", {MReg(T2), MReg(T0),
-            MReg(T1)}));
+        emitInstr(MIPSInstr("slt", {rd, lhsReg, rhsReg}));
         break;
     case IcmpInstr::IcmpOp::SLE:
-        mipsFunc->addInstr(MIPSInstr("slt", {MReg(T2), MReg(T1),
-            MReg(T0)}));
-        mipsFunc->addInstr(MIPSInstr("xori", {MReg(T2), MReg(T2),
-            MIPSOperand(1)}));
+        emitInstr(MIPSInstr("slt", {rd, rhsReg, lhsReg}));
+        emitInstr(MIPSInstr("xori", {rd, rd, MIPSOperand(1)}));
         break;
     case IcmpInstr::IcmpOp::SGT:
-        mipsFunc->addInstr(MIPSInstr("slt", {MReg(T2), MReg(T1),
-            MReg(T0)}));
+        emitInstr(MIPSInstr("slt", {rd, rhsReg, lhsReg}));
         break;
     case IcmpInstr::IcmpOp::SGE:
-        mipsFunc->addInstr(MIPSInstr("slt", {MReg(T2), MReg(T0),
-            MReg(T1)}));
-        mipsFunc->addInstr(MIPSInstr("xori", {MReg(T2), MReg(T2),
-            MIPSOperand(1)}));
+        emitInstr(MIPSInstr("slt", {rd, lhsReg, rhsReg}));
+        emitInstr(MIPSInstr("xori", {rd, rd, MIPSOperand(1)}));
         break;
     }
 
-    storeValue(mipsFunc, MReg(T2), instr, func);
+    cacheResult(instr, rd);
 }
 
 // ============================================================
 // 分支指令
 // ============================================================
 void MIPSCodeGenerator::genBr(MIPSFunction* mipsFunc, BrInstr* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
-    }
-    if (!func) return;
-
+    (void)mipsFunc;
     if (instr->getCondition()) {
-        // 条件分支: br i1 cond, trueBB, falseBB
-        loadValue(mipsFunc, instr->getCondition(), MReg(T0), func);
-        std::string trueLabel = getBBLabel(instr->getTrueBlock());
-        std::string falseLabel = getBBLabel(instr->getFalseBlock());
-        mipsFunc->addInstr(MIPSInstr("bnez", {MReg(T0),
-            MIPSOperand(trueLabel)}));
-        mipsFunc->addInstr(MIPSInstr("j",
-            {MIPSOperand(falseLabel)}));
+        // 条件加载到临时寄存器 (不缓存, 避免 BB 边界残留)
+        MReg cond = allocReg();
+        loadValue(instr->getCondition(), cond);
+        emitInstr(MIPSInstr("bnez", {cond,
+            MIPSOperand(getBBLabel(instr->getTrueBlock()))}));
+        emitInstr(MIPSInstr("j", {MIPSOperand(getBBLabel(instr->getFalseBlock()))}));
     } else {
-        // 无条件分支: br targetBB
-        std::string target = getBBLabel(instr->getTrueBlock());
-        mipsFunc->addInstr(MIPSInstr("j",
-            {MIPSOperand(target)}));
+        emitInstr(MIPSInstr("j", {MIPSOperand(getBBLabel(instr->getTrueBlock()))}));
     }
 }
 
@@ -562,186 +777,179 @@ void MIPSCodeGenerator::genBr(MIPSFunction* mipsFunc, BrInstr* instr) {
 // 返回指令
 // ============================================================
 void MIPSCodeGenerator::genRet(MIPSFunction* mipsFunc, RetInstr* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
-    }
-    if (!func) return;
-
-    // 加载返回值到 $v0
     if (instr->getReturnValue()) {
-        loadValue(mipsFunc, instr->getReturnValue(), MReg(V0), func);
+        loadValue(instr->getReturnValue(), MReg(MReg::V0));
     }
-
-    // Epilogue
-    mipsFunc->addInstr(MIPSInstr::makeComment("=== epilogue ==="));
-    mipsFunc->addInstr(MIPSInstr("lw", {MReg(Ra),
-        MIPSOperand(0, MReg(Fp))}));
-    mipsFunc->addInstr(MIPSInstr("lw", {MReg(MReg::T8),
-        MIPSOperand(4, MReg(Fp))}));
-    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(Sp), MReg(Fp),
-        MIPSOperand(frameMap[func].frameSize)}));
-    mipsFunc->addInstr(MIPSInstr("move", {
-        MReg(Fp), MReg(MReg::T8)}));
-    mipsFunc->addInstr(MIPSInstr("jr", {MReg(Ra)}));
+    emitEpilogue(mipsFunc, frameMap[currentFunc].frameSize);
 }
 
 // ============================================================
 // 函数调用
 // ============================================================
 void MIPSCodeGenerator::genCall(MIPSFunction* mipsFunc, CallInstr* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
-    }
-    if (!func) return;
+    (void)mipsFunc;
+    // 调用前清空寄存器缓存 (保护 caller-saved $t0-$t7)
+    flushRegCache();
 
-    // 将实参加载到 $a0-$a3
     size_t argCount = instr->getArgumentsCount();
-    for (size_t i = 0; i < argCount && i < 4; ++i) {
-        loadValue(mipsFunc, instr->getArgument(i),
-            static_cast<MReg>(static_cast<int>(MReg::A0) + i), func);
+
+    // 第 5+ 个参数压栈 (O32 风格: 调用者预留 16 字节参数保存区 + 栈参数)
+    if (argCount > 4) {
+        int64_t stackArgBytes = 16 + 4 * (int64_t)(argCount - 4);
+        emitInstr(MIPSInstr("addiu", {MReg(MReg::Sp), MReg(MReg::Sp),
+            MIPSOperand(-stackArgBytes)}));
     }
 
-    // jal
-    Function* callee = instr->getFunction();
-    mipsFunc->addInstr(MIPSInstr("jal",
-        {MIPSOperand(getFuncLabel(callee))}));
+    for (size_t i = 0; i < argCount; ++i) {
+        if (i < 4) {
+            MReg argReg =
+                static_cast<MReg>(static_cast<int>(MReg::A0) + i);
+            loadValue(instr->getArgument(i), argReg);
+        } else {
+            MReg reg = loadValue(instr->getArgument(i), MReg(MReg::T8));
+            int64_t off = 16 + 4 * (int64_t)(i - 4);
+            emitInstr(MIPSInstr("sw", {reg,
+                MIPSOperand((int)off, MReg(MReg::Sp))}));
+        }
+    }
 
-    // 存储返回值
+    emitInstr(MIPSInstr("jal", {MIPSOperand(getFuncLabel(instr->getFunction()))}));
+
+    if (argCount > 4) {
+        int64_t stackArgBytes = 16 + 4 * (int64_t)(argCount - 4);
+        emitInstr(MIPSInstr("addiu", {MReg(MReg::Sp), MReg(MReg::Sp),
+            MIPSOperand(stackArgBytes)}));
+    }
+
+    // 返回值
     if (instr->getType() && !instr->getType()->isVoid()) {
-        storeValue(mipsFunc, MReg(V0), instr, func);
+        MReg rd = allocReg();
+        emitInstr(MIPSInstr("move", {rd, MReg(MReg::V0)}));
+        cacheResult(instr, rd);
     }
 }
 
 // ============================================================
-// Alloca 指令
+// Alloca 指令: 不生成指令, 地址按需计算 (fp + offset)
 // ============================================================
 void MIPSCodeGenerator::genAlloca(MIPSFunction* mipsFunc, AllocaInst* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
-    }
-    if (!func) return;
-
-    // alloca: 取地址 (栈帧中的偏移即为地址)
-    int offset = getOffset(instr, func);
-    mipsFunc->addInstr(MIPSInstr("addiu", {MReg(T0),
-        MReg(Fp), MIPSOperand(offset)},
-        "alloca result address"));
-    storeValue(mipsFunc, MReg(T0), instr, func);
+    mipsFunc->addInstr(MIPSInstr::makeComment(
+        "alloca " + instr->getName() + " @ fp+" + std::to_string(getOffset(instr))));
 }
 
 // ============================================================
 // Load 指令
 // ============================================================
 void MIPSCodeGenerator::genLoad(MIPSFunction* mipsFunc, LoadInst* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
+    (void)mipsFunc;
+    MReg ptrReg = loadAddress(instr->getPointer());
+    MReg rd = allocReg({ptrReg});
+    if (isI8Type(instr->getType())) {
+        emitInstr(MIPSInstr("lbu", {rd, MIPSOperand(0, ptrReg)}));
+    } else {
+        emitInstr(MIPSInstr("lw", {rd, MIPSOperand(0, ptrReg)}));
     }
-    if (!func) return;
-
-    // 加载指针值到 $t0
-    loadValue(mipsFunc, instr->getPointer(), MReg(T0), func);
-    // 从内存加载
-    mipsFunc->addInstr(MIPSInstr("lw", {MReg(T1),
-        MIPSOperand(0, MReg(T0))}));
-    // 存储结果
-    storeValue(mipsFunc, MReg(T1), instr, func);
+    cacheResult(instr, rd);
 }
 
 // ============================================================
 // Store 指令
 // ============================================================
 void MIPSCodeGenerator::genStore(MIPSFunction* mipsFunc, StoreInst* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
+    (void)mipsFunc;
+    MReg valReg = loadValue(instr->getValue());
+    MReg ptrReg = loadAddress(instr->getPointer(), {valReg});
+    if (isI8Type(instr->getValue()->getType())) {
+        emitInstr(MIPSInstr("sb", {valReg, MIPSOperand(0, ptrReg)}));
+    } else {
+        emitInstr(MIPSInstr("sw", {valReg, MIPSOperand(0, ptrReg)}));
     }
-    if (!func) return;
-
-    // 加载值到 $t0, 指针到 $t1
-    loadValue(mipsFunc, instr->getValue(), MReg(T0), func);
-    loadValue(mipsFunc, instr->getPointer(), MReg(T1), func);
-    // 存储
-    mipsFunc->addInstr(MIPSInstr("sw", {MReg(T0),
-        MIPSOperand(0, MReg(T1))}));
 }
 
 // ============================================================
-// GEP 指令
+// GEP 指令: 按类型结构精确计算偏移
 // ============================================================
-void MIPSCodeGenerator::genGEP(MIPSFunction* mipsFunc, GetElementPtrInst* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
+void MIPSCodeGenerator::genGEP(MIPSFunction* mipsFunc,
+                               GetElementPtrInst* instr) {
+    (void)mipsFunc;
+    MReg addrReg = loadAddress(instr->getPointer());
+
+    LLVM::Type* curType = nullptr;
+    if (instr->getPointer()->getType() &&
+        instr->getPointer()->getType()->isPointer()) {
+        curType = static_cast<LLVM::PointerType*>(
+                      instr->getPointer()->getType())
+                      ->getPointedType();
     }
-    if (!func) return;
 
-    // GEP: 计算元素地址
-    // 简化: base + sum(indices[i] * elementSize[i])
-    loadValue(mipsFunc, instr->getPointer(), MReg(T0), func);
-
-    // 第一个 index 通常是 0 (数组首地址)
-    // 后续 index 乘以元素大小累加
-    MReg addrReg = MReg(T0);
     for (size_t i = 0; i < instr->getIndicesCount(); ++i) {
-        Value* indexVal = instr->getIndex(i);
-        loadValue(mipsFunc, indexVal, MReg(T1), func);
+        Value* idx = instr->getIndex(i);
+        // 第 k 个索引的步长 = 当前层类型的完整大小 (sizeof(T_k)):
+        //   指针 | [2 x [3 x i32]]*  索引 [0,1,1] -> 0 + 1*12 + 1*4 = 16
+        //   即 LLVM GEP 语义: 第 0 个索引用 sizeof(指针指向类型),
+        //   之后每个索引用"当前数组类型的元素大小" (= sizeof(剥一层后的类型))。
+        int step = static_cast<int>(getTypeSize(curType));
 
-        // 计算这一维的元素大小 (简化: 假设 4 字节)
-        // TODO: 根据 GEP 的类型结构精确计算元素大小
-        int elemSize = 4;
+        int64_t constIdx = 0;
+        bool isConst = isConstantIntVal(idx, constIdx);
 
-        mipsFunc->addInstr(MIPSInstr("li", {MReg(T2),
-            MIPSOperand(elemSize)}));
-        mipsFunc->addInstr(MIPSInstr("mul", {MReg(T1),
-            MReg(T1), MReg(T2)}));
-        mipsFunc->addInstr(MIPSInstr("addu", {addrReg,
-            addrReg, MReg(T1)}));
+        if (isConst && constIdx == 0) {
+            // 0 索引: 跳过 (常见于 GEP a, 0, i, j 的第一维)
+        } else if (isConst) {
+            int64_t off = constIdx * step;
+            if (isSmallImm(off)) {
+                MReg newAddr = allocReg({addrReg});
+                emitInstr(MIPSInstr("addiu", {newAddr, addrReg,
+                    MIPSOperand(off)}));
+                addrReg = newAddr;
+            } else {
+                MReg tmp = allocReg({addrReg});
+                emitInstr(MIPSInstr("li", {tmp, MIPSOperand(off)}));
+                MReg newAddr = allocReg({addrReg, tmp});
+                emitInstr(MIPSInstr("addu", {newAddr, addrReg, tmp}));
+                addrReg = newAddr;
+            }
+        } else {
+            MReg idxReg = loadValue(idx, std::set<MReg>{addrReg});
+            MReg tmp = allocReg({addrReg, idxReg});
+            emitInstr(MIPSInstr("li", {tmp, MIPSOperand(step)}));
+            emitInstr(MIPSInstr("mul", {tmp, idxReg, tmp}));
+            MReg newAddr = allocReg({addrReg, idxReg, tmp});
+            emitInstr(MIPSInstr("addu", {newAddr, addrReg, tmp}));
+            addrReg = newAddr;
+        }
+
+        curType = gepAdvance(curType);
     }
 
-    // 存储结果地址
-    storeValue(mipsFunc, addrReg, instr, func);
+    cacheResult(instr, addrReg);
 }
 
 // ============================================================
 // Zext 指令
 // ============================================================
 void MIPSCodeGenerator::genZext(MIPSFunction* mipsFunc, ZextInstr* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
-    }
-    if (!func) return;
-
-    // zext i1 → i32: 加载并保证非 0/1
-    loadValue(mipsFunc, instr->getOperand(), MReg(T0), func);
-    // andi $t0, $t0, 1 (确保只有最低位)
-    mipsFunc->addInstr(MIPSInstr("andi", {MReg(T0), MReg(T0),
-        MIPSOperand(1)}));
-    storeValue(mipsFunc, MReg(T0), instr, func);
+    (void)mipsFunc;
+    MReg reg = loadValue(instr->getOperand());
+    MReg rd = allocReg({reg});
+    emitInstr(MIPSInstr("andi", {rd, reg, MIPSOperand(1)}));
+    cacheResult(instr, rd);
 }
 
 // ============================================================
-// Phi 指令
+// Phi 消除: 收集每个前驱 BB 需要写入的 phi 值
 // ============================================================
-void MIPSCodeGenerator::genPhi(MIPSFunction* mipsFunc, PhiInstr* instr) {
-    Function* func = nullptr;
-    for (auto& [f, info] : frameMap) {
-        if (info.valueOffset.count(instr)) { func = f; break; }
+void MIPSCodeGenerator::collectPhiCopies(Function* func) {
+    phiCopies.clear();
+    for (size_t i = 0; i < func->getBasicBlocksCount(); ++i) {
+        BasicBlock* bb = func->getBasicBlock(i);
+        for (size_t j = 0; j < bb->getInstructionsCount(); ++j) {
+            if (auto* phi = dynamic_cast<PhiInstr*>(bb->getInstruction(j))) {
+                for (size_t k = 0; k < phi->getIncomingCount(); ++k) {
+                    auto [val, predBB] = phi->getIncoming(k);
+                    phiCopies[predBB].push_back({phi, val});
+                }
+            }
+        }
     }
-    if (!func) return;
-
-    // Phi: 在每个前驱块结束时将对应的 incoming 值复制到 phi 结果
-    // 简化实现: 在当前块开头从第一个 incoming 加载
-    // TODO: 正确实现需要在每个前驱块末尾插入 copy 指令
-    if (instr->getIncomingCount() > 0) {
-        auto [val, bb] = instr->getIncoming(0);
-        loadValue(mipsFunc, val, MReg(T0), func);
-        storeValue(mipsFunc, MReg(T0), instr, func);
-    }
-    mipsFunc->addInstr(MIPSInstr::makeComment(
-        "TODO: Phi - only loaded first incoming"));
 }

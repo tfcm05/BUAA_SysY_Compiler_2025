@@ -17,13 +17,15 @@ bool AlgebraicSimplification::isConstInt(Value* v, int64_t val) const {
 }
 
 Value* AlgebraicSimplification::getConstInt(LLVM::Type* type, int64_t val) {
-    auto& cache = (val == 0) ? zeroCache : oneCache;
-    auto it = cache.find(type);
-    if (it != cache.end()) {
+    // 进程级静态缓存: 常量生命周期覆盖整个程序, IRPrinter 打印 (IRVisitor 析构) 时仍有效
+    static std::unordered_map<LLVM::Type*, std::unordered_map<int64_t, std::unique_ptr<Value>>> cache;
+    auto& byVal = cache[type];
+    auto it = byVal.find(val);
+    if (it != byVal.end()) {
         return it->second.get();
     }
     auto ci = new ConstantInt(type, val, "");
-    cache[type] = std::unique_ptr<Value>(ci);
+    byVal[val] = std::unique_ptr<Value>(ci);
     return ci;
 }
 
@@ -143,7 +145,18 @@ bool AlgebraicSimplification::replaceUsesInFunction(Function* func, Value* oldVa
 
 int AlgebraicSimplification::run() {
     int total = 0;
-    const std::vector<Function*>& funcs = module.getFunctions();
+
+    // main 函数只通过 setMainFunction 注册, 不在 getFunctions() 中, 需单独加入
+    std::vector<Function*> funcs = module.getFunctions();
+    if (Function* mainFunc = module.getMainFunction()) {
+        bool found = false;
+        for (Function* f : funcs) {
+            if (f == mainFunc) { found = true; break; }
+        }
+        if (!found) {
+            funcs.push_back(mainFunc);
+        }
+    }
 
     // 固定点迭代: 前一轮的化简可能暴露新的可化简指令 (如 or 0, a -> a 后 a 的结果被复用)
     const int MAX_ITER = 8;

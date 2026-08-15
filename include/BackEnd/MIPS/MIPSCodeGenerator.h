@@ -1,34 +1,34 @@
 #ifndef MIPS_CODE_GENERATOR_H
 #define MIPS_CODE_GENERATOR_H
 
-#include "../MIPS.h"
+#include "MIPS.h"
 #include "../../MiddleEnd/IntermediateCodeGenerate/Module.h"
 #include "../../MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
 
+#include <set>
 #include <unordered_map>
+#include <vector>
 
 // ============================================================
-// MIPS 代码生成器
+// MIPS 代码生成器 (基本块级寄存器缓存)
 //
 // 遍历 LLVM IR Module, 生成 MIPS 汇编:
 //   1. 全局变量 / 字符串常量 → .data 段
 //   2. 每个函数 → .text 段, 含 prologue/epilogue
 //   3. 每条 LLVM IR 指令 → 对应 MIPS 指令序列
 //
-// 寄存器分配策略 (栈式):
-//   - 每个 LLVM IR Value 分配一个栈帧槽位 (4 字节)
-//   - $t0-$t2 作为临时寄存器, 按需 load/store
-//   - 函数参数: $a0-$a3 传入, prologue 中存到栈帧
-//   - 函数返回: $v0
-//   - $ra 在 prologue 中保存, epilogue 中恢复
+// 寄存器分配策略 (基本块级缓存):
+//   - T0-T7 作为 BB 级寄存器缓存池, 维护 Value* -> MReg 映射
+//   - 每个 LLVM IR Value 仍分配栈帧槽位作为溢出目的地
+//   - 指令结果优先留在寄存器中, BB 结束时统一写回栈帧
+//   - 函数调用前清空缓存 (保护 caller-saved 寄存器)
+//   - Phi 在代码生成前消除: 每个前驱 BB 的 terminator 前写 phi 栈槽
 //
-// 栈帧布局 (高地址 → 低地址):
+// 栈帧布局 (fp 指向帧底, offset 相对 fp):
 //   $fp → [$ra]         offset 0
 //          [$fp_saved]   offset 4
-//          [local var 0]  offset 8
-//          [local var 1]  offset 12
-//          ...
-//   $sp → frame bottom
+//          [参数/局部]   offset 8+
+//   $sp → frame bottom (fp = sp)
 // ============================================================
 class MIPSCodeGenerator {
 public:
@@ -43,14 +43,13 @@ private:
     LLVMContext& context;
     std::unique_ptr<MIPSModule> mipsModule;
 
-    // ---- 全局变量与字符串 ----
+    // ---- 数据段生成 ----
     void generateGlobalVariables();
     void generateStringConstants();
+    void collectGlobalWords(const Constant* c, std::vector<int64_t>& out) const;
 
-    // ---- 函数生成 ----
+    // ---- 函数 / 基本块生成 ----
     void generateFunction(Function* func);
-
-    // ---- 基本块生成 ----
     void generateBasicBlock(MIPSFunction* mipsFunc, BasicBlock* bb);
 
     // ---- 指令生成 (分派) ----
@@ -65,39 +64,61 @@ private:
     void genStore(MIPSFunction* mipsFunc, StoreInst* instr);
     void genGEP(MIPSFunction* mipsFunc, GetElementPtrInst* instr);
     void genZext(MIPSFunction* mipsFunc, ZextInstr* instr);
-    void genPhi(MIPSFunction* mipsFunc, PhiInstr* instr);
 
     // ---- 栈帧管理 ----
     struct FrameInfo {
         int frameSize = 0;       // 总栈帧大小
-        int nextOffset = 8;      // 下一个可用 offset (跳过 $ra 和 $fp)
+        int nextOffset = 8;      // 下一个可用 offset (跳过 $ra 和 $fp_saved)
         std::unordered_map<const Value*, int> valueOffset;  // Value* → 栈偏移
     };
     std::unordered_map<Function*, FrameInfo> frameMap;
     std::unordered_map<BasicBlock*, std::string> bbLabels;  // BB → MIPS 标签
+    Function* currentFunc = nullptr;   // 当前正在生成的函数 (去掉 O(n) 扫描)
 
-    // 为函数内所有 Value 分配栈槽
     void allocateFrame(Function* func);
-    // 获取 Value 在栈帧中的偏移
-    int getOffset(const Value* val, Function* func);
-    // 获取 BB 对应的 MIPS 标签
-    std::string getBBLabel(BasicBlock* bb);
-    // 获取函数对应的 MIPS 标签
-    std::string getFuncLabel(Function* func);
-    // 获取全局变量的 MIPS 标签
-    std::string getGlobalLabel(GlobalVariable* gv);
-    // 获取数组类型占用的字节数
-    size_t getTypeSize(LLVM::Type* type);
-    // 获取数组元素的对齐大小
-    int getElementSize(LLVM::Type* type);
+    int getOffset(const Value* val) const;
+    bool hasStackSlot(const Value* val) const;
+    std::string getBBLabel(BasicBlock* bb) const;
+    std::string getFuncLabel(const Function* func) const;
+    std::string getGlobalLabel(const GlobalVariable* gv) const;
+    size_t getTypeSize(LLVM::Type* type) const;
+    LLVM::Type* gepAdvance(LLVM::Type* cur) const;
+    bool isI8Type(LLVM::Type* type) const;
 
-    // ---- 临时寄存器管理 ----
-    // 将 Value 的值加载到指定寄存器
-    void loadValue(MIPSFunction* mipsFunc, const Value* val, MReg dst, Function* func);
-    // 将寄存器值存储到 Value 的栈槽
-    void storeValue(MIPSFunction* mipsFunc, MReg src, const Value* val, Function* func);
-    // 将地址 (栈槽地址 or 全局地址) 加载到寄存器
-    void loadAddress(MIPSFunction* mipsFunc, const Value* val, MReg dst, Function* func);
+    // ---- 寄存器缓存 (BB 级) ----
+    static constexpr int NUM_T_REGS = 8;   // T0-T7
+    std::unordered_map<const Value*, MReg> regCache;  // Value → T 寄存器
+    std::unordered_map<MReg, const Value*> regOwner;  // T 寄存器 → Value
+    bool regBusy[NUM_T_REGS] = {false};               // T0-T7 占用标记
+    MIPSFunction* curMipsFunc = nullptr;              // 当前输出函数
+
+    int regIndex(MReg r) const {
+        return static_cast<int>(r) - static_cast<int>(MReg::T0);
+    }
+    bool isTReg(MReg r) const {
+        int v = static_cast<int>(r);
+        return v >= static_cast<int>(MReg::T0) && v <= static_cast<int>(MReg::T7);
+    }
+
+    MReg allocReg(const std::set<MReg>& avoid = {});
+    void flushRegCache();
+    void cacheResult(const Value* val, MReg reg);
+    MReg loadValue(const Value* val, const std::set<MReg>& avoid = {});
+    MReg loadValue(const Value* val, MReg dst);   // 强制加载到指定寄存器 (不缓存)
+    MReg loadAddress(const Value* val, const std::set<MReg>& avoid = {});
+    void loadValueInto(const Value* val, MReg reg, bool isAddress);
+
+    // ---- Phi 消除 ----
+    // 前驱 BB → (phi 结果, incoming 值) 列表
+    std::unordered_map<BasicBlock*, std::vector<std::pair<Value*, Value*>>> phiCopies;
+    void collectPhiCopies(Function* func);
+
+    // ---- 工具 ----
+    void emitInstr(const MIPSInstr& instr) { curMipsFunc->addInstr(instr); }
+    static bool isSmallImm(int64_t v) { return v >= -32768 && v <= 32767; }
+    static bool isUnsignedImm16(int64_t v) { return v >= 0 && v <= 65535; }
+    static bool isConstantIntVal(const Value* v, int64_t& out);
+    void emitEpilogue(MIPSFunction* mipsFunc, int frameSize);
 };
 
 #endif

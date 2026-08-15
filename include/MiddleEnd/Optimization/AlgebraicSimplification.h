@@ -28,14 +28,11 @@ private:
     Module& module;
     LLVMContext& llvmContext;
 
-    // 缓存本 pass 创建的常量 (管理所有权, 避免泄漏)
-    std::unordered_map<LLVM::Type*, std::unique_ptr<Value>> zeroCache;
-    std::unordered_map<LLVM::Type*, std::unique_ptr<Value>> oneCache;
-
     // v 是否为值为 val 的 ConstantInt
     bool isConstInt(Value* v, int64_t val) const;
 
-    // 获取 (type, val) 的常量, 有缓存则复用
+    // 获取 (type, val) 的常量; 缓存在进程级静态容器中,
+    // 常量生命周期延长到程序结束, 保证 IRPrinter 打印时仍有效
     Value* getConstInt(LLVM::Type* type, int64_t val);
 
     // 将 func 内所有指令中对 oldValue 的引用替换为 newValue (指针比较)

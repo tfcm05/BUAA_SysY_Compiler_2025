@@ -7,6 +7,8 @@
 #include "include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
 #include "include/MiddleEnd/Optimization/AlgebraicSimplification.h"
+#include "include/BackEnd/MIPS/MIPSCodeGenerator.h"
+#include "include/BackEnd/MIPS/MIPSPeepholeOptimizer.h"
 
 int main() {
     std::ifstream file("testfile.txt"); // 打开文件
@@ -15,48 +17,49 @@ int main() {
         return 1;
     }
 
-    std::cout << "--- Starting Lexical & Syntax Analysis ---\n" << std::endl;
+    // 词法 & 语法分析
     LexicalAnalysis lexicalAnalysis = LexicalAnalysis(file);
     Parser parse = Parser(lexicalAnalysis);
     auto root = parse.parse();
     parse.parserLog(root.get());
-    std::cout << "\n--- Lexical & Syntax Analysis Finished ---\n" << std::endl;
 
-    std::cout << "...\n" << std::endl;
-    std::cout << "..\n" << std::endl;
-    std::cout << ".\n" << std::endl;
-
-    
-    std::cout << "--- Starting Semantic Analysis ---\n" << std::endl;
+    // 语义分析
     ClangContext clangContext;
     SemanticVisitor semanticVisitor(clangContext);
     root->accept(semanticVisitor, std::make_shared<SemanticContext>());
-    std::cout << "\n--- Semantic Analysis Finished ---\n" << std::endl;
-    
+
     dumpErrorsToFile();
 
     if (getErrorCount() > 0) {
-        std::cout << "\n--- Semantic errors found (" << getErrorCount() << "), skipping IR generation ---\n" << std::endl;
         return 0;
     }
 
-    std::cout << "...\n" << std::endl;
-    std::cout << "..\n" << std::endl;
-    std::cout << ".\n" << std::endl;
-
-    
-    std::cout << "--- Starting Intermediate Code Generation ---\n" << std::endl;
+    // 中间代码生成 (IR 打印在 IRVisitor 析构时写入 llvm_ir.txt)
     LLVMContext llvmContext;
     Module module;
     IRBuilder builder(llvmContext);
     IRVisitor irVisitor(module, builder, llvmContext);
     root->accept(irVisitor, std::make_shared<IRContext>());
-    std::cout << "\n--- Intermediate Code Generation Finished ---\n" << std::endl;
 
-    std::cout << "--- Algebraic Simplification ---\n" << std::endl;
+    // IR 优化 pass
     AlgebraicSimplification algSim(module, llvmContext);
-    int nSim = algSim.run();
-    std::cout << "AlgebraicSimplification: " << nSim << " simplifications\n" << std::endl;
-    
+    algSim.run();
+
+    // MIPS 后端: 代码生成 + 窥孔优化
+    MIPSCodeGenerator mipsGen(module, llvmContext);
+    auto mipsModule = mipsGen.run();
+
+    MIPSPeepholeOptimizer peephole(*mipsModule);
+    peephole.run();
+
+    // 输出 MIPS 汇编
+    std::ofstream mipsFile("mips.s");
+    if (mipsFile.is_open()) {
+        MIPSPrinter printer;
+        printer.print(*mipsModule, mipsFile);
+    } else {
+        std::cout << "Error: Could not open mips.s for writing\n" << std::endl;
+    }
+
     return 0;
 }

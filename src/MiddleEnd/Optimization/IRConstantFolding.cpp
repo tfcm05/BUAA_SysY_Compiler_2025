@@ -12,9 +12,14 @@ IRConstantFolding::IRConstantFolding(Module& module, LLVMContext& context)
 
 IRConstantFolding::~IRConstantFolding() = default;
 
+std::vector<std::unique_ptr<ConstantInt>>& IRConstantFolding::constantPool() {
+    static std::vector<std::unique_ptr<ConstantInt>> pool;
+    return pool;
+}
+
 ConstantInt* IRConstantFolding::createConstantInt(LLVM::Type* type, int64_t value) {
     auto ci = new ConstantInt(type, value, "const.fold");
-    ownedConstants.push_back(std::unique_ptr<ConstantInt>(ci));
+    constantPool().push_back(std::unique_ptr<ConstantInt>(ci));
     return ci;
 }
 
