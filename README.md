@@ -5,9 +5,12 @@
 ## 编译与运行
 
 ```bash
-# 编译编译器 (推荐 CMake)
-cmake -S . -B build && cmake --build build
-# 或: g++ -std=c++17 -O1 -Iinclude -o build/Compiler Compiler.cpp $(find src -name "*.cpp")
+# 编译编译器 (推荐 CMake; Debug=-O0 快增量, Release=-O2)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j$(nproc)
+# Release: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
+# 若已安装 ccache, CMake 会自动设为 CMAKE_CXX_COMPILER_LAUNCHER
+# 或 (单文件链接, 开发备用): mkdir -p build && g++ -std=c++17 -O0 -Iinclude -o build/Compiler Compiler.cpp $(find src -name "*.cpp")
 
 # 编译源程序
 ./build/Compiler [源文件]   # 默认 testfile.txt
@@ -51,8 +54,8 @@ testfile.txt
        │ Module
        ▼
 ┌──────────────┐
-│  IR 优化      │  代数化简 Pass (AlgebraicSimplification)
-│  Optimization│  → Module (优化后)
+│  IR 优化      │  PassManager: AS → ConstFold → ConstBr →
+│  Optimization│  DeadBlock → DeadInstr → Module (优化后)
 └──────┬───────┘
        │
        ├──────────────────────────────┐
@@ -113,12 +116,13 @@ src/
 │   │           ├── Constant/  # ConstInt/ConstArray/ConstString/GlobalValue
 │   │           └── Instruction/ # 算术逻辑/控制流/内存访问/函数调用
 │   └── Optimization/         # IR 优化 Pass
-│       ├── Pass.h                          # Module 级 Pass 接口
+│       ├── Pass.h / PassManager.h          # Module 级 Pass 接口与编排
+│       ├── IRReplaceUses.cpp               # 安全操作数替换 (扫描式 use-def)
 │       ├── AlgebraicSimplification.cpp     # 代数化简 (已接入)
-│       ├── IRConstantFolding.cpp           # 常量折叠 (已实现, 未接入)
-│       ├── DeadInstructionElimination.cpp  # 死指令消除 (已实现, 未接入)
-│       ├── DeadBlockElimination.cpp        # 死基本块消除 (已实现, 未接入)
-│       └── ConstantBranchFolding.cpp       # 常量分支化简 (已实现, 未接入)
+│       ├── IRConstantFolding.cpp           # 常量折叠 (已接入)
+│       ├── ConstantBranchFolding.cpp       # 常量分支化简 (已接入)
+│       ├── DeadBlockElimination.cpp        # 死基本块消除 (已接入; Phi 块合并已门控)
+│       └── DeadInstructionElimination.cpp  # 死指令消除 (已接入)
 ├── BackEnd/
 │   └── MIPS/                 # MIPS 后端
 │       ├── MIPSCodeGenerator.cpp   # 代码生成 (Phi消除/寄存器缓存/栈帧)

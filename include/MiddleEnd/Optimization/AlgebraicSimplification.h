@@ -5,51 +5,23 @@
 #include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
 #include "MiddleEnd/Optimization/Pass.h"
 
-#include <memory>
-#include <unordered_map>
 #include <cstdint>
 
-// 代数化简 pass:
-// 遍历 Module 中所有函数的指令, 对算术/逻辑/比较指令做保值化简。
-// 该 pass 只做"引用替换": 将后续指令中对被化简指令结果的引用改为等价的新 Value,
-// 不删除指令本身 (删除交给死指令消除 pass)。
-//
-// 规则:
-//   add  x, 0 / add 0, x        -> x
-//   sub  x, 0                   -> x
-//   mul  x, 1 / mul 1, x        -> x
-//   mul  x, 0 / mul 0, x        -> 0
-//   sdiv x, 1                   -> x
-//   and  x, 0 / and 0, x        -> 0
-//   or   x, 0 / or  0, x        -> x
-//   icmp EQ/SLE/SGE x, x        -> true (1)
-//   icmp NE/SLT/SGT x, x        -> false (0)
+// Algebraic identity rewrite via replaceUsesInFunction; does not delete instrs.
 class AlgebraicSimplification : public Pass {
 private:
     Module& module;
     LLVMContext& llvmContext;
 
-    // v 是否为值为 val 的 ConstantInt
     bool isConstInt(Value* v, int64_t val) const;
-
-    // 获取 (type, val) 的常量; 缓存在进程级静态容器中,
-    // 常量生命周期延长到程序结束, 保证 IRPrinter 打印时仍有效
     Value* getConstInt(LLVM::Type* type, int64_t val);
-
-    // 将 func 内所有指令中对 oldValue 的引用替换为 newValue (指针比较)
-    // 返回是否实际发生了至少一处替换
-    bool replaceUsesInFunction(Function* func, Value* oldValue, Value* newValue);
 
 public:
     AlgebraicSimplification(Module& mod, LLVMContext& ctx);
 
     const char* getName() const override { return "AlgebraicSimplification"; }
-
-    // Pass interface; uses the Module/Context bound at construction.
     int runOnModule(Module& module, LLVMContext& context) override;
-
-    // Convenience wrapper
     int run();
 };
 
-#endif // MIDDLEEND_OPTIMIZATION_ALGEBRAIC_SIMPLIFICATION_H
+#endif
