@@ -84,15 +84,21 @@ src/
 │           └── Statement.cpp
 ├── MiddleEnd/
 │   ├── SemanticAnalysis/     # 语义分析 (单遍扫描, 先声明后使用)
-│   │   ├── SemanticVisitor.cpp
+│   │   ├── SemanticVisitor.cpp  # 核心: Info/Context/符号辅助
+│   │   ├── SemanticDecl.cpp     # 声明/Declarator/Initializer
+│   │   ├── SemanticExp.cpp      # 表达式
+│   │   ├── SemanticStmt.cpp     # 语句
+│   │   ├── ConstEval.cpp        # 编译期常量折叠
 │   │   ├── ClangContext.cpp   # 类型工厂
 │   │   ├── Type.cpp
 │   │   ├── Symbol.cpp         # 符号 (name/type/kind/constValue; 无 Value*)
 │   │   ├── AnalysisResult.h   # 语义注解表 (Symbol/type/const)
 │   │   ├── ConstValue.cpp
+│   │   ├── ScopeGuard.h / DeclaratorTypeBuilder.h
 │   │   └── SymbolTable.cpp    # 作用域与符号表
 │   ├── IntermediateCodeGenerate/ # IR 生成
-│   │   ├── IRVisitor.cpp      # IR 生成 (读 AnalysisResult)
+│   │   ├── IRVisitor.cpp      # 核心: Info/Context/convertType
+│   │   ├── IRDecl.cpp / IRExp.cpp / IRStmt.cpp
 │   │   ├── IRBindings.h       # 会话 Symbol*→Value*
 │   │   ├── EnsureI1.h / ArrayInitIR.h  # IR 辅助
 │   │   ├── IRBuilder.cpp      # IR 指令构造器
