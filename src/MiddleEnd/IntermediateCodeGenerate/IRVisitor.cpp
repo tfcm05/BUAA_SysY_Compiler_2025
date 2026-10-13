@@ -9,16 +9,22 @@ void IRInfo::setValue(Value* val) { value = val; }
 
 // IRContext Implementation
 IRContext::IRContext()
-    : purpose(visitPurpose::DEFAULT), type(nullptr), values{nullptr, nullptr} {}
+    : purpose(visitPurpose::DEFAULT), addressValue(nullptr),
+      continueBB(nullptr), breakBB(nullptr), type(nullptr) {}
 
 IRContext::visitPurpose IRContext::getVisitPurpose() const { return purpose; }
 void IRContext::setVisitPurpose(visitPurpose vp) { purpose = vp; }
 
-Value* IRContext::getValue() const { return values[0]; }
-void IRContext::setValue(Value* val) { values[0] = val; }
+Value* IRContext::getAddressValue() const { return addressValue; }
+void IRContext::setAddressValue(Value* val) { addressValue = val; }
 
-Value* IRContext::getValue(size_t index) const { return values[index]; }
-void IRContext::setValue(size_t index, Value* val) { values[index] = val; }
+BasicBlock* IRContext::getContinueBB() const { return continueBB; }
+void IRContext::setContinueBB(BasicBlock* bb) { continueBB = bb; }
+BasicBlock* IRContext::getBreakBB() const { return breakBB; }
+void IRContext::setBreakBB(BasicBlock* bb) { breakBB = bb; }
+
+Value* IRContext::getValue() const { return addressValue; }
+void IRContext::setValue(Value* val) { addressValue = val; }
 
 LLVM::Type* IRContext::getType() const { return type; }
 void IRContext::setType(LLVM::Type* ty) { type = ty; }
@@ -31,10 +37,9 @@ const std::vector<size_t>& IRContext::getIndices() const { return indices; }
 ContextPtr IRContext::clone() {
     auto cloned = std::make_shared<IRContext>();
     cloned->setVisitPurpose(purpose);
-    
-    cloned->values[0] = values[0];
-    cloned->values[1] = values[1];
-    
+    cloned->addressValue = addressValue;
+    cloned->continueBB = continueBB;
+    cloned->breakBB = breakBB;
     cloned->setType(type);
     cloned->indices = indices;
     return cloned;
@@ -99,11 +104,9 @@ static void storeZeroElement(IRBuilder& builder, LLVMContext& ctx, Value* base, 
 IRVisitor::IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx)
     : module(mod), builder(bld), llvmContext(ctx) {}
 
-IRVisitor::~IRVisitor() {
-    // 打印前确保所有函数的基本块都有终止指令 (最后一个函数还未处理)
+void IRVisitor::finalize() {
+    // Ensure every function basic block has a terminator before passes / print.
     builder.ensureTerminatorInCurrentFunction();
-    IRPrinter printer;
-    printer.printModule(module);
 }
 
 LLVM::Type* IRVisitor::convertType(Clang::Type* clangType) {
@@ -193,7 +196,7 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
         if (isGlobalVar) {
             auto globalVar = builder.createGlobalVariable(llvmType);
             module.addGlobalVariable(globalVar);
-            symbol->setValue(globalVar);
+            bindings.set(symbol, globalVar);
 
             auto initDeclarator = dynamic_cast<InitialDeclarator*>(declarator);
             if (!initDeclarator || !initDeclarator->getInitializer()) {
@@ -214,7 +217,7 @@ InfoPtr IRVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
         } else {
             // 局部自动变量: alloca + store
             auto allocaInst = builder.createAlloca(llvmType);
-            symbol->setValue(allocaInst);
+            bindings.set(symbol, allocaInst);
 
             auto addressContext = std::dynamic_pointer_cast<IRContext>(context->clone());
             addressContext->setValue(allocaInst);
@@ -242,7 +245,7 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
     }
 
     auto llvmFuncType = convertType(funcSymbol->getType());
-    auto existingFunction = dynamic_cast<Function*>(funcSymbol->getValue());
+    auto existingFunction = dynamic_cast<Function*>(bindings.get(funcSymbol));
 
     if (node->getBody()) {
         // 有函数体: 创建函数定义
@@ -261,7 +264,7 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
             } else {
                 module.addFunction(function);
             }
-            funcSymbol->setValue(function);
+            bindings.set(funcSymbol, function);
         }
 
         // 为形参创建 Argument
@@ -273,7 +276,7 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
                 continue;
             }
             auto arg = builder.createArgument(convertType(paramSymbol->getType()));
-            paramSymbol->setValue(arg);
+            bindings.set(paramSymbol, arg);
         }
 
         node->getBody()->accept(*this, context);
@@ -286,7 +289,7 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
             } else {
                 module.addFunction(function);
             }
-            funcSymbol->setValue(function);
+            bindings.set(funcSymbol, function);
         }
     }
 
@@ -382,7 +385,7 @@ InfoPtr IRVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr context) {
         return nullptr;
     }
 
-    auto value = symbol->getValue();
+    auto value = bindings.get(symbol);
     if (!value) {
         // 不再内置任何函数(printf/getint/putint/putstr 均需用户在 SysY 中声明)
         return nullptr;
@@ -845,8 +848,8 @@ InfoPtr IRVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
 
 
     auto bodyContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-    bodyContext->setValue(0, iterBlock);
-    bodyContext->setValue(1, exitBlock);
+    bodyContext->setContinueBB(iterBlock);
+    bodyContext->setBreakBB(exitBlock);
 
     builder.setInsertPoint(bodyBlock);
     if (node->getBody()) {
@@ -913,8 +916,8 @@ InfoPtr IRVisitor::visitWhileStmt(WhileStmt* node, ContextPtr context) {
     }
 
     auto bodyContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-    bodyContext->setValue(0, condBlock);
-    bodyContext->setValue(1, exitBlock);
+    bodyContext->setContinueBB(condBlock);
+    bodyContext->setBreakBB(exitBlock);
 
     builder.setInsertPoint(bodyBlock);
     if (node->getBody()) {
@@ -940,8 +943,8 @@ InfoPtr IRVisitor::visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) {
     builder.createBr(bodyBlock);
 
     auto bodyContext = std::dynamic_pointer_cast<IRContext>(context->clone());
-    bodyContext->setValue(0, condBlock);
-    bodyContext->setValue(1, exitBlock);
+    bodyContext->setContinueBB(condBlock);
+    bodyContext->setBreakBB(exitBlock);
 
     builder.setInsertPoint(bodyBlock);
     if (node->getBody()) {
@@ -1056,7 +1059,7 @@ InfoPtr IRVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
 
 InfoPtr IRVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
     auto breakContext = std::dynamic_pointer_cast<IRContext>(context);
-    auto breakTarget = dynamic_cast<BasicBlock*>(breakContext->getValue(1));
+    auto breakTarget = breakContext->getBreakBB();
     if (!breakTarget) {
         return nullptr;
     }
@@ -1067,7 +1070,7 @@ InfoPtr IRVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
 
 InfoPtr IRVisitor::visitContinueStmt(ContinueStmt* node, ContextPtr context) {
     auto continueContext = std::dynamic_pointer_cast<IRContext>(context);
-    auto continueTarget = dynamic_cast<BasicBlock*>(continueContext->getValue(0));
+    auto continueTarget = continueContext->getContinueBB();
     if (!continueTarget) {
         return nullptr;
     }

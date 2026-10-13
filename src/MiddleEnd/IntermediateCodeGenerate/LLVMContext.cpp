@@ -32,6 +32,26 @@ public:
     std::unordered_map<unsigned int, IntegerType*> integerTypes;
     std::unordered_map<Type*, PointerType*> pointerTypes;
     std::unordered_map<std::pair<Type*, size_t>, ArrayType*, pair_hash> arrayTypes;
+
+    struct FunctionTypeKey {
+        Type* returnType;
+        std::vector<Type*> params;
+        bool isVarArg;
+        bool operator==(const FunctionTypeKey& o) const {
+            return returnType == o.returnType && isVarArg == o.isVarArg && params == o.params;
+        }
+    };
+    struct FunctionTypeKeyHash {
+        std::size_t operator()(const FunctionTypeKey& k) const {
+            std::size_t h = std::hash<Type*>{}(k.returnType);
+            h ^= std::hash<bool>{}(k.isVarArg) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            for (Type* p : k.params) {
+                h ^= std::hash<Type*>{}(p) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            }
+            return h;
+        }
+    };
+    std::unordered_map<FunctionTypeKey, FunctionType*, FunctionTypeKeyHash> functionTypes;
     
     // 使用 unique_ptr 来自动管理所有动态分配的类型的内存
     std::vector<std::unique_ptr<Type>> ownedTypes;
@@ -64,6 +84,7 @@ public:
         auto newType = std::unique_ptr<FunctionType>(new FunctionType(returnType, params, isVarArg));
         FunctionType* result = newType.get();
         ownedTypes.push_back(std::move(newType));
+        functionTypes[FunctionTypeKey{returnType, params, isVarArg}] = result;
         return result;
     }
 };
@@ -112,5 +133,10 @@ LLVM::ArrayType* LLVMContext::getArrayTyImpl(LLVM::Type* elementType, size_t siz
 }
 
 LLVM::FunctionType* LLVMContext::getFunctionTyImpl(LLVM::Type* returnType, const std::vector<LLVM::Type*>& params, bool isVarArg) {
+    LLVM::LLVMContextImpl::FunctionTypeKey key{returnType, params, isVarArg};
+    auto it = pImpl->functionTypes.find(key);
+    if (it != pImpl->functionTypes.end()) {
+        return it->second;
+    }
     return pImpl->createFunctionType(returnType, params, isVarArg);
 }

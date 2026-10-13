@@ -17,7 +17,7 @@ void SemanticInfo::setName(const std::string& n) { name = n; }
 
 // SemanticContext implementation
 SemanticContext::SemanticContext()
-    : purpose(VisitPurpose::DEFAULT), type(nullptr), loopFlag(false) {}
+    : purpose(VisitPurpose::DEFAULT), type(nullptr), loopFlag(false), staticStorageRegion(false) {}
 
 SemanticContext::VisitPurpose SemanticContext::getVisitPurpose() const { return purpose; }
 void SemanticContext::setVisitPurpose(VisitPurpose vp) { purpose = vp; }
@@ -28,11 +28,15 @@ void SemanticContext::setType(Clang::Type* ty) { type = ty; }
 bool SemanticContext::inLoop() const { return loopFlag; }
 void SemanticContext::setLoopFlag(bool lf) { loopFlag = lf; }
 
+bool SemanticContext::isStaticStorageRegion() const { return staticStorageRegion; }
+void SemanticContext::setStaticStorageRegion(bool ssr) { staticStorageRegion = ssr; }
+
 ContextPtr SemanticContext::clone() {
     auto cloned = std::make_shared<SemanticContext>();
     cloned->setVisitPurpose(purpose);
     cloned->setType(type);
     cloned->setLoopFlag(loopFlag);
+    cloned->setStaticStorageRegion(staticStorageRegion);
     return cloned;
 }
 
@@ -85,7 +89,9 @@ SemanticVisitor::~SemanticVisitor() {
 InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
     // 单遍扫描: 按源码顺序处理
     auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    varContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
+    // File-scope variables have static storage duration; keep purpose DEFAULT
+    // and mark the region explicitly (do not overload EVALUATE_CONST).
+    varContext->setStaticStorageRegion(true);
     auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
     funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
 
@@ -107,9 +113,9 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
     auto varType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
     bool isConstVar = node->getDeclSpec().isConst();
 
-    // C 存储期判定: 全局变量 (visitCompUnit 传入 EVALUATE_CONST) 和 static 局部变量具有静态存储期
+    // C 存储期判定: 文件作用域 (staticStorageRegion) 和 static 局部变量具有静态存储期
     // 静态存储期对象的初始化器必须是常量表达式
-    bool isStaticStorage = (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST)
+    bool isStaticStorage = semanticContext->isStaticStorageRegion()
                            || (sc == StorageClass::STATIC);
 
     auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());

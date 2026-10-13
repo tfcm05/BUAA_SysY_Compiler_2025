@@ -1,7 +1,9 @@
 build/
+build-cmake/
 *.txt
 *.s
 *.log
+!CMakeLists.txt
 !tests/cases/*.sy
 !tests/cases/*.out
 !tests/cases/*.in

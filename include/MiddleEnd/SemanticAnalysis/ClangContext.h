@@ -18,6 +18,7 @@ public:
 
     Clang::PointerType* getPointerTyImpl(Clang::Type* pointedType);
     Clang::ArrayType* getArrayTyImpl(Clang::Type* elementType, size_t size);
+    // Uniquified by (returnType, params..., isVarArg): identical signatures share one pointer.
     Clang::FunctionType* getFunctionTyImpl(Clang::Type* returnType, const std::vector<Clang::Type*>& params, bool isVarArg);
 
     Clang::Type* getQualifiedTyImpl(Clang::Type* baseType, unsigned int qualifier);

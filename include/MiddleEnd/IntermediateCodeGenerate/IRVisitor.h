@@ -6,11 +6,14 @@
 #include "../SemanticAnalysis/SymbolTable.h"
 #include "IRBuilder.h"
 #include "IRPrinter.h"
+#include "IRBindings.h"
 
 #include <string>
 #include <unordered_map>
 #include <iostream>
 #include <vector>
+
+class BasicBlock;
 
 class IRInfo : public Info {
 private:
@@ -32,7 +35,12 @@ public:
 private:
     visitPurpose purpose;
 
-    Value* values[2];
+    // Local initializer store destination (alloca / GEP base).
+    Value* addressValue;
+
+    // Innermost loop targets for break / continue (explicit LoopContext fields).
+    BasicBlock* continueBB;
+    BasicBlock* breakBB;
 
     // 初始化相关
     LLVM::Type *type;
@@ -43,11 +51,17 @@ public:
     visitPurpose getVisitPurpose() const;
     void setVisitPurpose(visitPurpose vp);
 
+    Value* getAddressValue() const;
+    void setAddressValue(Value* val);
+
+    BasicBlock* getContinueBB() const;
+    void setContinueBB(BasicBlock* bb);
+    BasicBlock* getBreakBB() const;
+    void setBreakBB(BasicBlock* bb);
+
+    // Back-compat aliases used by initializer paths (address only).
     Value* getValue() const;
     void setValue(Value* val);
-
-    Value* getValue(size_t index) const;
-    void setValue(size_t index, Value* val);
 
     LLVM::Type* getType() const;
     void setType(LLVM::Type* ty);
@@ -65,13 +79,17 @@ private:
     Module& module;
     IRBuilder& builder;
     LLVMContext& llvmContext;
+    IRBindings bindings;
 
     std::unordered_map<Clang::Type*, LLVM::Type*> typeCache;
 
     LLVM::Type* convertType(Clang::Type* clangType);
 public:
     IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx);
-    ~IRVisitor();
+    ~IRVisitor() override = default;
+
+    // Finalize: ensure terminators. Caller should printModule after passes.
+    void finalize();
 
     // Expressions
     InfoPtr visitLiteralExp(LiteralExp* node, ContextPtr context) override;

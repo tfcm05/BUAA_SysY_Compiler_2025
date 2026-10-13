@@ -17,7 +17,7 @@ bool AlgebraicSimplification::isConstInt(Value* v, int64_t val) const {
 }
 
 Value* AlgebraicSimplification::getConstInt(LLVM::Type* type, int64_t val) {
-    // 进程级静态缓存: 常量生命周期覆盖整个程序, IRPrinter 打印 (IRVisitor 析构) 时仍有效
+    // 进程级静态缓存: 常量生命周期覆盖整个程序, IRPrinter 打印时仍有效
     static std::unordered_map<LLVM::Type*, std::unordered_map<int64_t, std::unique_ptr<Value>>> cache;
     auto& byVal = cache[type];
     auto it = byVal.find(val);
@@ -141,6 +141,13 @@ bool AlgebraicSimplification::replaceUsesInFunction(Function* func, Value* oldVa
         }
     }
     return any;
+}
+
+int AlgebraicSimplification::runOnModule(Module& mod, LLVMContext& ctx) {
+    // Bound at construction; ignore alternate Module/Context to keep lifetime simple.
+    (void)mod;
+    (void)ctx;
+    return run();
 }
 
 int AlgebraicSimplification::run() {

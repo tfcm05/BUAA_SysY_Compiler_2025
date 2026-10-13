@@ -6,14 +6,20 @@
 
 #include "include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "include/MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
+#include "include/MiddleEnd/Optimization/Pass.h"
 #include "include/MiddleEnd/Optimization/AlgebraicSimplification.h"
 #include "include/BackEnd/MIPS/MIPSCodeGenerator.h"
 #include "include/BackEnd/MIPS/MIPSPeepholeOptimizer.h"
 
-int main() {
-    std::ifstream file("testfile.txt"); // 打开文件
+#include <vector>
+#include <memory>
+
+int main(int argc, char* argv[]) {
+    const char* inputPath = (argc > 1) ? argv[1] : "testfile.txt";
+    std::ifstream file(inputPath);
     if (!file.is_open()) {
-        std::cout << "Error: Could not open file\n" << std::endl;
+        std::cout << "Error: Could not open file: " << inputPath << std::endl;
         return 1;
     }
 
@@ -34,16 +40,26 @@ int main() {
         return 0;
     }
 
-    // 中间代码生成 (IR 打印在 IRVisitor 析构时写入 llvm_ir.txt)
+    // 中间代码生成
     LLVMContext llvmContext;
     Module module;
     IRBuilder builder(llvmContext);
     IRVisitor irVisitor(module, builder, llvmContext);
     root->accept(irVisitor, std::make_shared<IRContext>());
+    irVisitor.finalize();
 
-    // IR 优化 pass
-    AlgebraicSimplification algSim(module, llvmContext);
-    algSim.run();
+    // IR 优化 pipeline (Module-level Passes only; no AST re-walk)
+    std::vector<std::unique_ptr<Pass>> passes;
+    passes.push_back(std::make_unique<AlgebraicSimplification>(module, llvmContext));
+    for (auto& pass : passes) {
+        pass->runOnModule(module, llvmContext);
+    }
+
+    // Print IR after passes (not in IRVisitor destructor)
+    {
+        IRPrinter printer;
+        printer.printModule(module);
+    }
 
     // MIPS 后端: 代码生成 + 窥孔优化
     MIPSCodeGenerator mipsGen(module, llvmContext);

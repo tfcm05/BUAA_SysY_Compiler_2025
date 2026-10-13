@@ -53,6 +53,10 @@ private:
 
     // 是否在循环体内
     bool loopFlag;
+
+    // File-scope / static-storage declaration region (not const-eval).
+    // Set when visiting global VariableDecls from CompUnit.
+    bool staticStorageRegion;
 public:
     SemanticContext();
     ContextPtr clone() override;
@@ -65,6 +69,9 @@ public:
 
     bool inLoop() const;
     void setLoopFlag(bool lf);
+
+    bool isStaticStorageRegion() const;
+    void setStaticStorageRegion(bool ssr);
 };
 
 class SemanticVisitor : public AstVisitor {

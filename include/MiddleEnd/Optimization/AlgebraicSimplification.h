@@ -3,6 +3,7 @@
 
 #include "MiddleEnd/IntermediateCodeGenerate/Module.h"
 #include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
+#include "MiddleEnd/Optimization/Pass.h"
 
 #include <memory>
 #include <unordered_map>
@@ -23,7 +24,7 @@
 //   or   x, 0 / or  0, x        -> x
 //   icmp EQ/SLE/SGE x, x        -> true (1)
 //   icmp NE/SLT/SGT x, x        -> false (0)
-class AlgebraicSimplification {
+class AlgebraicSimplification : public Pass {
 private:
     Module& module;
     LLVMContext& llvmContext;
@@ -42,7 +43,12 @@ private:
 public:
     AlgebraicSimplification(Module& mod, LLVMContext& ctx);
 
-    // 执行化简, 返回化简次数
+    const char* getName() const override { return "AlgebraicSimplification"; }
+
+    // Pass interface; uses the Module/Context bound at construction.
+    int runOnModule(Module& module, LLVMContext& context) override;
+
+    // Convenience wrapper
     int run();
 };
 

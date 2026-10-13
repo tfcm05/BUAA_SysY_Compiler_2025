@@ -37,6 +37,27 @@ public:
 
     // 限定类型的缓存
     std::unordered_map<std::pair<Type*, unsigned int>, Type*, pair_hash> qualifiedTypes;
+
+    // FunctionType uniquify key: (return, params..., variadic)
+    struct FunctionTypeKey {
+        Type* returnType;
+        std::vector<Type*> params;
+        bool isVarArg;
+        bool operator==(const FunctionTypeKey& o) const {
+            return returnType == o.returnType && isVarArg == o.isVarArg && params == o.params;
+        }
+    };
+    struct FunctionTypeKeyHash {
+        std::size_t operator()(const FunctionTypeKey& k) const {
+            std::size_t h = std::hash<Type*>{}(k.returnType);
+            h ^= std::hash<bool>{}(k.isVarArg) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            for (Type* p : k.params) {
+                h ^= std::hash<Type*>{}(p) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            }
+            return h;
+        }
+    };
+    std::unordered_map<FunctionTypeKey, FunctionType*, FunctionTypeKeyHash> functionTypes;
     
     // 使用 unique_ptr 的 vector 来自动管理所有动态分配的类型的内存
     std::vector<std::unique_ptr<Type>> ownedTypes;
@@ -89,11 +110,12 @@ public:
         return result;
     }
 
-    // 函数类型的辅助创建函数
+    // 函数类型的辅助创建函数 (caller already checked cache)
     FunctionType* createFunctionType(Type* returnType, const std::vector<Type*>& params, bool isVarArg) {
         auto newType = std::unique_ptr<FunctionType>(new FunctionType(returnType, params, isVarArg));
         FunctionType* result = newType.get();
         ownedTypes.push_back(std::move(newType));
+        functionTypes[FunctionTypeKey{returnType, params, isVarArg}] = result;
         return result;
     }
 
@@ -193,6 +215,11 @@ Clang::ArrayType* ClangContext::getArrayTyImpl(Clang::Type* elementType, size_t 
 }
 
 Clang::FunctionType* ClangContext::getFunctionTyImpl(Clang::Type* returnType, const std::vector<Clang::Type*>& params, bool isVarArg) {
+    Clang::ClangContextImpl::FunctionTypeKey key{returnType, params, isVarArg};
+    auto it = pImpl->functionTypes.find(key);
+    if (it != pImpl->functionTypes.end()) {
+        return it->second;
+    }
     return pImpl->createFunctionType(returnType, params, isVarArg);
 }
 

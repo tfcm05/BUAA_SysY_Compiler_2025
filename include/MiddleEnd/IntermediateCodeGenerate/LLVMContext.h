@@ -14,6 +14,7 @@ public:
     LLVM::IntegerType* getIntegerTyImpl(unsigned int bitWidth);
     LLVM::PointerType* getPointerTyImpl(LLVM::Type* elementType);
     LLVM::ArrayType* getArrayTyImpl(LLVM::Type* elementType, size_t size);
+    // Uniquified by (returnType, params..., isVarArg): identical signatures share one pointer.
     LLVM::FunctionType* getFunctionTyImpl(LLVM::Type* returnType, const std::vector<LLVM::Type*>& params, bool isVarArg);
 };
 
