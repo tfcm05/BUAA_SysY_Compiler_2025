@@ -54,8 +54,8 @@ testfile.txt
        │ Module
        ▼
 ┌──────────────┐
-│  IR 优化      │  PassManager: AS → ConstFold → ConstBr →
-│  Optimization│  DeadBlock → DeadInstr → Module (优化后)
+│  IR 优化      │  PassManager: Mem2Reg(单块) → AS → ConstFold →
+│  Optimization│  ConstBr → DeadBlock → DeadInstr
 └──────┬───────┘
        │
        ├──────────────────────────────┐
@@ -118,6 +118,7 @@ src/
 │   └── Optimization/         # IR 优化 Pass
 │       ├── Pass.h / PassManager.h          # Module 级 Pass 接口与编排
 │       ├── IRReplaceUses.cpp               # 安全操作数替换 (扫描式 use-def)
+│       ├── Mem2Reg.cpp                     # 单块标量 alloca→SSA (已接入, 最先跑; 跨块暂缓)
 │       ├── AlgebraicSimplification.cpp     # 代数化简 (已接入)
 │       ├── IRConstantFolding.cpp           # 常量折叠 (已接入)
 │       ├── ConstantBranchFolding.cpp       # 常量分支化简 (已接入)
@@ -140,7 +141,7 @@ include/
 │   │   ├── Module.h
 │   │   ├── LLVMContext.h
 │   │   └── LLVM/              # IR 类型与 Value 层次 (Type.h, Value/, BasicBlock.h, Argument.h)
-│   └── Optimization/          # 5 个优化 Pass 头文件
+│   └── Optimization/          # 优化 Pass 头文件 (含 Mem2Reg)
 ├── BackEnd/
 │   └── MIPS/                  # MIPSCodeGenerator.h / MIPSPeepholeOptimizer.h / MIPS.h
 ├── Error.h                   # ErrorCode 枚举 (按编译阶段分类)

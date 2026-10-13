@@ -8,6 +8,7 @@
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
 #include "include/MiddleEnd/Optimization/PassManager.h"
+#include "include/MiddleEnd/Optimization/Mem2Reg.h"
 #include "include/MiddleEnd/Optimization/AlgebraicSimplification.h"
 #include "include/MiddleEnd/Optimization/IRConstantFolding.h"
 #include "include/MiddleEnd/Optimization/ConstantBranchFolding.h"
@@ -52,9 +53,10 @@ int main(int argc, char* argv[]) {
     irVisitor.finalize();
 
     // IR 优化 pipeline (Module-level Passes only; no AST re-walk)
-    // Order: algebraic → const fold → const branch → dead blocks → dead instrs
+    // Order: Mem2Reg → algebraic → const fold → const branch → dead blocks → dead instrs
     {
         PassManager pm;
+        pm.add(std::make_unique<Mem2Reg>(module, llvmContext));
         pm.add(std::make_unique<AlgebraicSimplification>(module, llvmContext));
         pm.add(std::make_unique<IRConstantFolding>(module, llvmContext));
         pm.add(std::make_unique<ConstantBranchFolding>(module));

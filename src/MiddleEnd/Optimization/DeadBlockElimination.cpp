@@ -100,6 +100,59 @@ void DeadBlockElimination::scrubPhiFromDeadBlocks(
     }
 }
 
+int DeadBlockElimination::scrubPhiToCFG(Function* func) const {
+    std::unordered_map<BasicBlock*, std::unordered_set<BasicBlock*>> preds;
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        std::vector<BasicBlock*> succs;
+        getSuccessors(bb, succs);
+        for (BasicBlock* s : succs) {
+            preds[s].insert(bb);
+        }
+    }
+    int scrubbed = 0;
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        for (Instruction* inst : bb->getInstructions()) {
+            auto* phi = dynamic_cast<PhiInstr*>(inst);
+            if (!phi) {
+                continue;
+            }
+            const auto& incomings = phi->getIncomingValues();
+            std::vector<std::pair<Value*, BasicBlock*>> kept;
+            kept.reserve(incomings.size());
+            bool changed = false;
+            const auto& predSet = preds[bb];
+            for (const auto& in : incomings) {
+                if (predSet.count(in.second) == 0) {
+                    changed = true;
+                    continue;
+                }
+                kept.push_back(in);
+            }
+            // Dedup: one incoming per predecessor (keep last).
+            std::unordered_map<BasicBlock*, Value*> byPred;
+            std::vector<BasicBlock*> order;
+            for (const auto& in : kept) {
+                if (byPred.find(in.second) == byPred.end()) {
+                    order.push_back(in.second);
+                }
+                byPred[in.second] = in.first;
+            }
+            if (order.size() != kept.size()) {
+                changed = true;
+                kept.clear();
+                for (BasicBlock* p : order) {
+                    kept.push_back({byPred[p], p});
+                }
+            }
+            if (changed) {
+                phi->setIncoming(kept);
+                ++scrubbed;
+            }
+        }
+    }
+    return scrubbed;
+}
+
 int DeadBlockElimination::eliminateDeadBlocks(Function* func) {
     std::vector<bool> reachable;
     markReachable(func, reachable);
@@ -227,6 +280,11 @@ int DeadBlockElimination::run() {
         for (Function* func : collectModuleFunctions(module)) {
             if (!func || func->getBasicBlocks().empty()) {
                 continue;
+            }
+            int scrubbed = scrubPhiToCFG(func);
+            if (scrubbed > 0) {
+                total += scrubbed;
+                changed = true;
             }
             int removed = eliminateDeadBlocks(func);
             if (removed > 0) {

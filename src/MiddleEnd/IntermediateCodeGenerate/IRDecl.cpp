@@ -160,8 +160,19 @@ InfoPtr IRVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr context)
         auto address = irContext.getValue();
         auto indices = irContext.getIndices();
 
+        auto widenToPointee = [&](Value* val, Value* ptr) -> Value* {
+            if (!val || !ptr || !ptr->getType() || !ptr->getType()->isPointer()) {
+                return val;
+            }
+            auto* pointee = static_cast<LLVM::PointerType*>(ptr->getType())->getPointedType();
+            if (pointee && val->getType() && pointee != val->getType()) {
+                return builder.createZext(pointee, val);
+            }
+            return val;
+        };
+
         if (indices.empty()) {
-            builder.createStore(expValue, address);
+            builder.createStore(widenToPointee(expValue, address), address);
             return nullptr;
         }
 
@@ -171,7 +182,7 @@ InfoPtr IRVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr context)
             gepIndices.push_back(builder.createConstInt(llvmContext.getIntegerTyImpl(32), index));
         }
         auto ptr = builder.createGEP(address, std::move(gepIndices));
-        builder.createStore(expValue, ptr);
+        builder.createStore(widenToPointee(expValue, ptr), ptr);
         return nullptr;
     }
 }

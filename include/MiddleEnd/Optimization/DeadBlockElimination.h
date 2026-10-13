@@ -16,6 +16,8 @@ private:
     void markReachable(Function* func, std::vector<bool>& reachable) const;
     void scrubPhiFromDeadBlocks(Function* func,
                                 const std::vector<BasicBlock*>& removed) const;
+    // Drop Phi incomings whose block is no longer a CFG predecessor.
+    int scrubPhiToCFG(Function* func) const;
     int eliminateDeadBlocks(Function* func);
     int mergeJumps(Function* func);
 
