@@ -5,16 +5,13 @@
 ## 编译与运行
 
 ```bash
-# 编译编译器
-g++ -std=c++17 -O1 -Iinclude -o build/Compiler Compiler.cpp $(find src -name "*.cpp")
+# 编译编译器 (推荐 CMake)
+cmake -S . -B build && cmake --build build
+# 或: g++ -std=c++17 -O1 -Iinclude -o build/Compiler Compiler.cpp $(find src -name "*.cpp")
 
-# 编译源程序 (源程序放在 testfile.txt)
-./build/Compiler
-# → 生成 parser.txt (AST 调试输出)
-# → 生成 symbol.txt (符号表)
-# → 生成 error.txt (编译错误, 若有)
-# → 生成 llvm_ir.txt (LLVM IR 输出)
-# → 生成 mips.s (MIPS 汇编输出)
+# 编译源程序
+./build/Compiler [源文件]   # 默认 testfile.txt
+# → parser.txt / symbol.txt / error.txt / llvm_ir.txt / mips.s
 
 # 链接运行 (LLVM IR 路线)
 clang -w -x ir llvm_ir.txt -x none tests/runtime.c -o program && ./program
@@ -42,14 +39,14 @@ testfile.txt
        │ AST
        ▼
 ┌──────────────┐
-│  语义分析     │  SemanticVisitor (Visitor 模式)
-│  Semantic     │  单遍扫描, 作用域/类型检查/常量折叠/错误检测
+│  语义分析     │  SemanticVisitor → AnalysisResult
+│  Semantic     │  单遍扫描; Symbol/类型/常量写入注解表
 └──────┬───────┘
-       │ AST (带语义信息)
+       │ AST + AnalysisResult
        ▼
 ┌──────────────┐
-│  IR 生成      │  IRVisitor + IRBuilder
-│  IR Gen       │  → Module (函数/基本块/指令)
+│  IR 生成      │  IRVisitor + IRBuilder + IRBindings
+│  IR Gen       │  → Module (Symbol→Value 会话映射)
 └──────┬───────┘
        │ Module
        ▼
@@ -90,11 +87,14 @@ src/
 │   │   ├── SemanticVisitor.cpp
 │   │   ├── ClangContext.cpp   # 类型工厂
 │   │   ├── Type.cpp
-│   │   ├── Symbol.cpp         # 符号 (name/type/kind/constValue/value)
+│   │   ├── Symbol.cpp         # 符号 (name/type/kind/constValue; 无 Value*)
+│   │   ├── AnalysisResult.h   # 语义注解表 (Symbol/type/const)
 │   │   ├── ConstValue.cpp
 │   │   └── SymbolTable.cpp    # 作用域与符号表
 │   ├── IntermediateCodeGenerate/ # IR 生成
-│   │   ├── IRVisitor.cpp      # IR 生成 (单遍扫描)
+│   │   ├── IRVisitor.cpp      # IR 生成 (读 AnalysisResult)
+│   │   ├── IRBindings.h       # 会话 Symbol*→Value*
+│   │   ├── EnsureI1.h / ArrayInitIR.h  # IR 辅助
 │   │   ├── IRBuilder.cpp      # IR 指令构造器
 │   │   ├── IRPrinter.cpp      # IR 文本输出 (声明/定义区分)
 │   │   ├── Module.cpp
@@ -107,6 +107,7 @@ src/
 │   │           ├── Constant/  # ConstInt/ConstArray/ConstString/GlobalValue
 │   │           └── Instruction/ # 算术逻辑/控制流/内存访问/函数调用
 │   └── Optimization/         # IR 优化 Pass
+│       ├── Pass.h                          # Module 级 Pass 接口
 │       ├── AlgebraicSimplification.cpp     # 代数化简 (已接入)
 │       ├── IRConstantFolding.cpp           # 常量折叠 (已实现, 未接入)
 │       ├── DeadInstructionElimination.cpp  # 死指令消除 (已实现, 未接入)
@@ -163,8 +164,10 @@ class AstVisitor {
 ```
 
 两种具体实现：
-- `SemanticVisitor` + `SemanticContext`/`SemanticInfo`：类型检查、作用域管理、常量折叠
-- `IRVisitor` + `IRContext`/`IRInfo`：生成 LLVM IR 指令
+- `SemanticVisitor` + `SemanticContext`/`SemanticInfo`：类型检查、作用域管理、常量折叠；结果写入 `AnalysisResult`
+- `IRVisitor` + `IRContext`/`IRInfo`：读 `AnalysisResult`，经 `IRBindings` 映射到 `Value*`
+
+`SemanticContext` / `IRContext` 使用显式 bool 字段（`wantConst` / `useLocation` 等），配合 `*ContextGuard` 就地改写再恢复，避免热路径上反复 `clone()`。`AstVisitor` 提供默认空 `visit*`，新增结点不必改所有 Visitor。
 
 ### Factory 模式
 
@@ -201,7 +204,7 @@ class AstVisitor {
 - **const 限定符**：`const` 是只读限定符而非编译期常量；局部 `const` 可用非常量表达式初始化；全局/static `const` 初始化器必须常量
 - **数组初始化**：嵌套 `{{1,2},{3,4}}` 与平铺 `{1,2,3,4}` 均可；缺省元素补零（全局/局部一致）
 - **return 分析**：`alwaysReturns` 递归判定 if/else 双分支均返回、块内任意位置 return 等情况
-- **常量折叠**：`EVALUATE_CONST` 模式下编译期计算常量表达式（算术/比较/逻辑）
+- **常量折叠**：`wantConst` 模式下编译期计算常量表达式（算术/比较/逻辑）
 - **短路求值**：`&&`/`||` 在 IR 生成时生成分支结构，左操作数确定结果时不求值右操作数
 - **数组退化**：数组传参退化为指针，GEP 计算元素地址
 

@@ -4,6 +4,7 @@
 #include "../../FrontEnd/SyntaxAnalysis/AstVisitor.h"
 #include "../../FrontEnd/SyntaxAnalysis/AstNode.h"
 #include "../SemanticAnalysis/SymbolTable.h"
+#include "../SemanticAnalysis/AnalysisResult.h"
 #include "IRBuilder.h"
 #include "IRPrinter.h"
 #include "IRBindings.h"
@@ -12,6 +13,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <vector>
+#include <memory>
 
 class BasicBlock;
 
@@ -20,36 +22,28 @@ private:
     Value* value;
 public:
     IRInfo(Value* val);
-
     Value* getValue() const;
     void setValue(Value* val);
 };
 
+// Explicit mode flags (no visitPurpose DSL).
 class IRContext : public Context {
-public:
-    enum visitPurpose {
-        DEFAULT,               // 默认
-        CREATE_GLOBAL_VARIABLE, // 全局变量
-        USE_LOCATION_VALUE,   // 左值
-    };
 private:
-    visitPurpose purpose;
-
-    // Local initializer store destination (alloca / GEP base).
+    bool createGlobalFlag;
+    bool useLocationFlag;
     Value* addressValue;
-
-    // Innermost loop targets for break / continue (explicit LoopContext fields).
     BasicBlock* continueBB;
     BasicBlock* breakBB;
-
-    // 初始化相关
-    LLVM::Type *type;
+    LLVM::Type* type;
     std::vector<size_t> indices;
 public:
     IRContext();
 
-    visitPurpose getVisitPurpose() const;
-    void setVisitPurpose(visitPurpose vp);
+    bool createGlobal() const;
+    void setCreateGlobal(bool v);
+    bool useLocation() const;
+    void setUseLocation(bool v);
+    void clearModes();
 
     Value* getAddressValue() const;
     void setAddressValue(Value* val);
@@ -69,29 +63,74 @@ public:
     size_t getIndicesCount() const;
     size_t getIndex(size_t index) const;
     void addIndex(size_t index);
+    void clearIndices();
+    void setIndices(const std::vector<size_t>& idxs);
     const std::vector<size_t>& getIndices() const;
 
     ContextPtr clone() override;
 };
+
+class IRContextGuard {
+private:
+    IRContext& ctx;
+    bool oldCreateGlobal;
+    bool oldUseLocation;
+    Value* oldAddress;
+    BasicBlock* oldContinueBB;
+    BasicBlock* oldBreakBB;
+    LLVM::Type* oldType;
+    std::vector<size_t> oldIndices;
+public:
+    explicit IRContextGuard(IRContext& c)
+        : ctx(c),
+          oldCreateGlobal(c.createGlobal()),
+          oldUseLocation(c.useLocation()),
+          oldAddress(c.getAddressValue()),
+          oldContinueBB(c.getContinueBB()),
+          oldBreakBB(c.getBreakBB()),
+          oldType(c.getType()),
+          oldIndices(c.getIndices()) {}
+
+    ~IRContextGuard() {
+        ctx.setCreateGlobal(oldCreateGlobal);
+        ctx.setUseLocation(oldUseLocation);
+        ctx.setAddressValue(oldAddress);
+        ctx.setContinueBB(oldContinueBB);
+        ctx.setBreakBB(oldBreakBB);
+        ctx.setType(oldType);
+        ctx.setIndices(oldIndices);
+    }
+
+    IRContextGuard(const IRContextGuard&) = delete;
+    IRContextGuard& operator=(const IRContextGuard&) = delete;
+};
+
+inline IRContext& asIR(const ContextPtr& context) {
+    return *static_cast<IRContext*>(context.get());
+}
+
+inline std::shared_ptr<IRInfo> asIRInfo(const InfoPtr& info) {
+    return std::static_pointer_cast<IRInfo>(info);
+}
 
 class IRVisitor : public AstVisitor {
 private:
     Module& module;
     IRBuilder& builder;
     LLVMContext& llvmContext;
+    const AnalysisResult& analysis;
     IRBindings bindings;
 
     std::unordered_map<Clang::Type*, LLVM::Type*> typeCache;
 
     LLVM::Type* convertType(Clang::Type* clangType);
+    Symbol* resolveSymbol(AstNode* node) const;
 public:
-    IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx);
+    IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx, const AnalysisResult& ar);
     ~IRVisitor() override = default;
 
-    // Finalize: ensure terminators. Caller should printModule after passes.
     void finalize();
 
-    // Expressions
     InfoPtr visitLiteralExp(LiteralExp* node, ContextPtr context) override;
     InfoPtr visitIdentifierExp(IdentifierExp* node, ContextPtr context) override;
     InfoPtr visitFunctionCallExp(FunctionCallExp* node, ContextPtr context) override;
@@ -101,7 +140,6 @@ public:
     InfoPtr visitAssignExp(AssignExp* node, ContextPtr context) override;
     InfoPtr visitCommaExp(CommaExp* node, ContextPtr context) override;
 
-    // Statements
     InfoPtr visitExpStmt(ExpStmt* node, ContextPtr context) override;
     InfoPtr visitForStmt(ForStmt* node, ContextPtr context) override;
     InfoPtr visitWhileStmt(WhileStmt* node, ContextPtr context) override;
@@ -112,23 +150,14 @@ public:
     InfoPtr visitReturnStmt(ReturnStmt* node, ContextPtr context) override;
     InfoPtr visitBlockStmt(BlockStmt* node, ContextPtr context) override;
 
-    // Initializers
     InfoPtr visitExpInitializer(ExpInitializer* node, ContextPtr context) override;
     InfoPtr visitListInitializer(ListInitializer* node, ContextPtr context) override;
 
-    // Declarators
-    InfoPtr visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) override;
-    InfoPtr visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) override;
-    InfoPtr visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) override;
-    InfoPtr visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) override;
-    InfoPtr visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) override;
-    
-    // Declarations
+    // Declarators: default empty on AstVisitor; IR does not walk them.
     InfoPtr visitVariableDecl(VariableDecl* node, ContextPtr context) override;
     InfoPtr visitFunctionDecl(FunctionDecl* node, ContextPtr context) override;
     InfoPtr visitParameterDecl(ParameterDecl* node, ContextPtr context) override;
 
-    // CompUnit
     InfoPtr visitCompUnit(CompUnit* node, ContextPtr context) override;
 };
 

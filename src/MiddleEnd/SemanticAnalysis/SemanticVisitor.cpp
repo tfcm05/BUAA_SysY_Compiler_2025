@@ -2,7 +2,7 @@
 
 // SemanticInfo implementation
 SemanticInfo::SemanticInfo()
-    : type(nullptr), lValueFlag(false), constValue(0) {}
+    : type(nullptr), lValueFlag(false), constValue(nullptr) {}
 
 Clang::Type* SemanticInfo::getType() const { return type; }
 void SemanticInfo::setType(Clang::Type* ty) { type = ty; }
@@ -15,12 +15,24 @@ void SemanticInfo::setConstValue(Clang::ConstValue* cv) { constValue = cv; }
 std::string SemanticInfo::getName() const { return name; }
 void SemanticInfo::setName(const std::string& n) { name = n; }
 
-// SemanticContext implementation
+// SemanticContext implementation — explicit mode flags
 SemanticContext::SemanticContext()
-    : purpose(VisitPurpose::DEFAULT), type(nullptr), loopFlag(false), staticStorageRegion(false) {}
+    : evaluateConstFlag(false), generateParamSymbolsFlag(false),
+      functionBodyOnlyFlag(false), type(nullptr), loopFlag(false),
+      staticStorageRegion(false) {}
 
-SemanticContext::VisitPurpose SemanticContext::getVisitPurpose() const { return purpose; }
-void SemanticContext::setVisitPurpose(VisitPurpose vp) { purpose = vp; }
+bool SemanticContext::wantConst() const { return evaluateConstFlag; }
+void SemanticContext::setWantConst(bool v) { evaluateConstFlag = v; }
+bool SemanticContext::generateParamSymbols() const { return generateParamSymbolsFlag; }
+void SemanticContext::setGenerateParamSymbols(bool v) { generateParamSymbolsFlag = v; }
+bool SemanticContext::functionBodyOnly() const { return functionBodyOnlyFlag; }
+void SemanticContext::setFunctionBodyOnly(bool v) { functionBodyOnlyFlag = v; }
+
+void SemanticContext::clearModes() {
+    evaluateConstFlag = false;
+    generateParamSymbolsFlag = false;
+    functionBodyOnlyFlag = false;
+}
 
 Clang::Type* SemanticContext::getType() const { return type; }
 void SemanticContext::setType(Clang::Type* ty) { type = ty; }
@@ -33,7 +45,9 @@ void SemanticContext::setStaticStorageRegion(bool ssr) { staticStorageRegion = s
 
 ContextPtr SemanticContext::clone() {
     auto cloned = std::make_shared<SemanticContext>();
-    cloned->setVisitPurpose(purpose);
+    cloned->setWantConst(evaluateConstFlag);
+    cloned->setGenerateParamSymbols(generateParamSymbolsFlag);
+    cloned->setFunctionBodyOnly(functionBodyOnlyFlag);
     cloned->setType(type);
     cloned->setLoopFlag(loopFlag);
     cloned->setStaticStorageRegion(staticStorageRegion);
@@ -88,12 +102,12 @@ SemanticVisitor::~SemanticVisitor() {
 
 InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
     // 单遍扫描: 按源码顺序处理
-    auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    auto varContext = std::static_pointer_cast<SemanticContext>(context->clone());
     // File-scope variables have static storage duration; keep purpose DEFAULT
     // and mark the region explicitly (do not overload EVALUATE_CONST).
     varContext->setStaticStorageRegion(true);
-    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
+    auto funcContext = std::static_pointer_cast<SemanticContext>(context->clone());
+    funcContext->clearModes();
 
     for (size_t i = 0; i < node->getDeclCount(); ++i) {
         if (auto varDecl = dynamic_cast<VariableDecl*>(node->getDecl(i))) {
@@ -108,17 +122,17 @@ InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
 
 InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr context) {
     auto sc = node->getDeclSpec().getStorageClass();
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    SemanticContext& semanticContext = asSem(context);
 
     auto varType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
     bool isConstVar = node->getDeclSpec().isConst();
 
     // C 存储期判定: 文件作用域 (staticStorageRegion) 和 static 局部变量具有静态存储期
     // 静态存储期对象的初始化器必须是常量表达式
-    bool isStaticStorage = semanticContext->isStaticStorageRegion()
+    bool isStaticStorage = semanticContext.isStaticStorageRegion()
                            || (sc == StorageClass::STATIC);
 
-    auto varContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    auto varContext = std::static_pointer_cast<SemanticContext>(context->clone());
     varContext->setType(varType);
 
     for (size_t i = 0; i < node->getDeclaratorsCount(); ++i) {
@@ -129,10 +143,10 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
         //   全局/static: 非常量初始化器 → 报错
         //   局部 const: 非常量初始化器 → 回退普通求值
         if (isStaticStorage || isConstVar) {
-            auto constContext = std::dynamic_pointer_cast<SemanticContext>(varContext->clone());
-            constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
+            auto constContext = std::static_pointer_cast<SemanticContext>(varContext->clone());
+            constContext->setWantConst(true);
             int errCountBefore = getErrorCount();
-            varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, constContext));
+            varInfo = asSemInfo(node->getDeclarator(i)->accept(*this, constContext));
 
             if (!varInfo) {
                 continue;  // 声明失败 (如数组尺寸非常量), 错误已记录
@@ -147,14 +161,14 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
                     continue;
                 }
                 // 局部 const: 回退普通求值
-                varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
+                varInfo = asSemInfo(node->getDeclarator(i)->accept(*this, varContext));
                 if (!varInfo) {
                     continue;
                 }
             }
         } else {
             // 局部自动变量: 普通求值
-            varInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator(i)->accept(*this, varContext));
+            varInfo = asSemInfo(node->getDeclarator(i)->accept(*this, varContext));
             if (!varInfo) {
                 continue;
             }
@@ -165,7 +179,7 @@ InfoPtr SemanticVisitor::visitVariableDecl(VariableDecl* node, ContextPtr contex
         } else {
             auto symbol = createSymbol(varInfo->getName(), sc, varInfo->getType(), Symbol::VARIABLE, varInfo->getConstValue());
             // 将Symbol信息存储到Declarator中
-            node->getDeclarator(i)->setSymbol(symbol);
+            bindSymbol(node->getDeclarator(i), symbol);
         }
     }
 
@@ -177,10 +191,10 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
     auto retType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
 
     // 访问 declarator 获取函数类型 (参数以 DEFAULT 模式访问, 不创建符号)
-    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    auto funcContext = std::static_pointer_cast<SemanticContext>(context->clone());
     funcContext->setType(retType);
-    funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
-    auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, funcContext));
+    funcContext->clearModes();
+    auto funcInfo = asSemInfo(node->getDeclarator()->accept(*this, funcContext));
     if (!funcInfo) {
         return nullptr;
     }
@@ -190,14 +204,14 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
     auto existingSymbol = curScope->lookup(funcInfo->getName());
     if (existingSymbol && existingSymbol->getKind() == Symbol::FUNCTION) {
         // 已有函数声明/定义: 复用已有符号
-        node->getDeclarator()->setSymbol(existingSymbol);
+        bindSymbol(node->getDeclarator(), existingSymbol);
     } else if (existingSymbol) {
         // 已存在但不是函数 → 名字冲突
         errorLog(ErrorCode::RedefinedName, node->getStartLine(), funcInfo->getName());
         return nullptr;
     } else {
         auto symbol = createSymbol(funcInfo->getName(), sc, funcInfo->getType(), Symbol::FUNCTION, nullptr);
-        node->getDeclarator()->setSymbol(symbol);
+        bindSymbol(node->getDeclarator(), symbol);
     }
 
     // 有函数体: 处理参数符号和函数体
@@ -205,13 +219,13 @@ InfoPtr SemanticVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr contex
         ScopeGuard guard(curScope);
 
         // 参数, 需要创建符号
-        auto paramContext = std::dynamic_pointer_cast<SemanticContext>(funcContext->clone());
-        paramContext->setVisitPurpose(SemanticContext::VisitPurpose::GENERATE_SYMBOL);
+        auto paramContext = std::static_pointer_cast<SemanticContext>(funcContext->clone());
+        paramContext->setGenerateParamSymbols(true);
         node->getDeclarator()->accept(*this, paramContext);
 
         // 函数体
-        auto bodyContext = std::dynamic_pointer_cast<SemanticContext>(funcContext->clone());
-        bodyContext->setVisitPurpose(SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY);
+        auto bodyContext = std::static_pointer_cast<SemanticContext>(funcContext->clone());
+        bodyContext->setFunctionBodyOnly(true);
         node->getBody()->accept(*this, bodyContext);
     }
 
@@ -223,22 +237,22 @@ InfoPtr SemanticVisitor::visitParameterDecl(ParameterDecl* node, ContextPtr cont
 
     auto paramType = convertToType(node->getDeclSpec().getTypeSpecifier(), node->getDeclSpec().getTypeQualifier());
 
-    auto paramContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
+    auto paramContext = std::static_pointer_cast<SemanticContext>(context->clone());
     paramContext->setType(paramType);
-    paramContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
-    auto paramInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, paramContext));
+    paramContext->clearModes();
+    auto paramInfo = asSemInfo(node->getDeclarator()->accept(*this, paramContext));
     if (!paramInfo) {
         return nullptr;
     }
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::GENERATE_SYMBOL) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.generateParamSymbols()) {
         if (curScope->existInCurScope(paramInfo->getName())) {
             errorLog(ErrorCode::RedefinedName, node->getStartLine(), paramInfo->getName());
         } else {
             auto symbol = createSymbol(paramInfo->getName(), sc, paramInfo->getType(), Symbol::PARAMETER, nullptr);
             // 将Symbol信息存储到Declarator中
-            node->getDeclarator()->setSymbol(symbol);
+            bindSymbol(node->getDeclarator(), symbol);
         }
     }
 
@@ -246,35 +260,37 @@ InfoPtr SemanticVisitor::visitParameterDecl(ParameterDecl* node, ContextPtr cont
 }
 
 InfoPtr SemanticVisitor::visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) {
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
+    SemanticContext& semanticContext = asSem(context);
 
     auto info = std::make_shared<SemanticInfo>();
 
     info->setName(node->getIdentifier());
-    info->setType(semanticContext->getType());
+    info->setType(semanticContext.getType());
 
     return info;
 }
 
 InfoPtr SemanticVisitor::visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) {
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    Clang::Type* currentType = semanticContext->getType();
+    SemanticContext& semanticContext = asSem(context);
+    Clang::Type* currentType = semanticContext.getType();
 
     // 将当前类型包装为指针类型
     auto ptrType = clangContext.getPointerTyImpl(currentType);
 
-    auto ptrContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    ptrContext->setType(ptrType);
-
-    return node->getPointer()->accept(*this, ptrContext);
+    {
+        SemanticContext& sem = asSem(context);
+        SemanticContextGuard guard(sem);
+        sem.setType(ptrType);
+        return node->getPointer()->accept(*this, context);
+    }
 }
 
 InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) {
-    auto constContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    constContext->setVisitPurpose(SemanticContext::VisitPurpose::EVALUATE_CONST);
+    auto constContext = std::static_pointer_cast<SemanticContext>(context->clone());
+    constContext->setWantConst(true);
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    Clang::Type* currentType = semanticContext->getType();
+    SemanticContext& semanticContext = asSem(context);
+    Clang::Type* currentType = semanticContext.getType();
     for (size_t i = node->getArraySizesCount(); i > 0; --i) {
         if (i == node->getArraySizesCount()) {
             // 最内层数组
@@ -284,7 +300,7 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
                 currentType = clangContext.getPointerTyImpl(currentType);
             } else {
                 // T arr[size];
-                auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
+                auto constInfo = asSemInfo(node->getArraySize(i - 1)->accept(*this, constContext));
                 if (!constInfo) {
                     return nullptr;
                 }
@@ -307,7 +323,7 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
                 currentType = clangContext.getPointerTyImpl(currentType);
                 continue;
             }
-            auto constInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArraySize(i - 1)->accept(*this, constContext));
+            auto constInfo = asSemInfo(node->getArraySize(i - 1)->accept(*this, constContext));
             if (!constInfo) {
                 return nullptr;
             }
@@ -324,20 +340,23 @@ InfoPtr SemanticVisitor::visitArrayDeclarator(ArrayDeclarator* node, ContextPtr 
             currentType = clangContext.getArrayTyImpl(currentType, intValue);
         }
     }
-    auto arrayContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    arrayContext->setType(currentType);
-
-    return node->getArray()->accept(*this, arrayContext);
+    {
+        SemanticContext& sem = asSem(context);
+        SemanticContextGuard guard(sem);
+        sem.setType(currentType);
+        return node->getArray()->accept(*this, context);
+    }
 }
 
 InfoPtr SemanticVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) {
     auto info = std::make_shared<SemanticInfo>();
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    Clang::Type* currentType = semanticContext->getType();
+    SemanticContext& semanticContext = asSem(context);
+    Clang::Type* currentType = semanticContext.getType();
     std::vector<Clang::Type*> paramTypes;
+    paramTypes.reserve(node->getParametersCount());
     for (size_t i = 0; i < node->getParametersCount(); ++i) {
-        auto paramInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getParameter(i)->accept(*this, context));
+        auto paramInfo = asSemInfo(node->getParameter(i)->accept(*this, context));
         if (!paramInfo) {
             return nullptr;
         }
@@ -345,22 +364,24 @@ InfoPtr SemanticVisitor::visitFuncDeclarator(FuncDeclarator* node, ContextPtr co
     }
     currentType = clangContext.getFunctionTyImpl(currentType, paramTypes, node->isVariadic());
     
-    auto funcContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    funcContext->setType(currentType);
-    funcContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
-
-    return node->getFunction()->accept(*this, funcContext);
+    {
+        SemanticContext& sem = asSem(context);
+        SemanticContextGuard guard(sem);
+        sem.setType(currentType);
+        sem.clearModes();
+        return node->getFunction()->accept(*this, context);
+    }
 }
 
 InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) {
-    auto info = std::dynamic_pointer_cast<SemanticInfo>(node->getDeclarator()->accept(*this, context));
+    auto info = asSemInfo(node->getDeclarator()->accept(*this, context));
     if (!info) {
         return nullptr;
     }
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
-        auto initInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getInitializer()->accept(*this, context));
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
+        auto initInfo = asSemInfo(node->getInitializer()->accept(*this, context));
         if (!initInfo) {
             return nullptr;
         }
@@ -377,15 +398,15 @@ InfoPtr SemanticVisitor::visitInitialDeclarator(InitialDeclarator* node, Context
 }
 
 InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr context) {
-    auto expInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getExp()->accept(*this, context));
+    auto expInfo = asSemInfo(node->getExp()->accept(*this, context));
     if (!expInfo) {
         return nullptr;
     }
 
     auto info = std::make_shared<SemanticInfo>();
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
         
         auto constValue = expInfo->getConstValue();
         if (!constValue || !constValue->isConstInteger()) {
@@ -393,7 +414,8 @@ InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr co
             return info;
         }
         auto intValue = static_cast<Clang::ConstInteger*>(constValue)->getIntValue();
-        node->setConstValue(intValue);
+        node->setConstValue(intValue);  // TODO: remove once IR reads AnalysisResult initConsts
+        analysisResult.setInitConst(node, intValue);
         info->setConstValue(clangContext.getConstIntegerImpl(intValue));
     }
 
@@ -403,12 +425,13 @@ InfoPtr SemanticVisitor::visitExpInitializer(ExpInitializer* node, ContextPtr co
 InfoPtr SemanticVisitor::visitListInitializer(ListInitializer* node, ContextPtr context) {
     auto info = std::make_shared<SemanticInfo>();
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
 
         auto constArray = std::vector<Clang::ConstValue*>{};
+        constArray.reserve(node->getInitializersCount());
         for (size_t i = 0; i < node->getInitializersCount(); ++i) {
-            auto childInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getInitializer(i)->accept(*this, context));
+            auto childInfo = asSemInfo(node->getInitializer(i)->accept(*this, context));
             if (!childInfo) {
                 return nullptr;
             }
@@ -430,15 +453,12 @@ InfoPtr SemanticVisitor::visitListInitializer(ListInitializer* node, ContextPtr 
 }
 
 InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
-
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-
+    SemanticContext& semanticContext = asSem(context);
     auto info = std::make_shared<SemanticInfo>();
-    
+
     if (node->getLiteralType() == LiteralExp::LiteralType::NUMBER) {
         info->setType(clangContext.getIntegerTyImpl());
-        auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-        if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+        if (semanticContext.wantConst()) {
             info->setConstValue(clangContext.getConstIntegerImpl(node->getNumberValue()));
         }
     } else if (node->getLiteralType() == LiteralExp::LiteralType::STRING) {
@@ -447,6 +467,10 @@ InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
             clangContext.getQualifiedTyImpl(clangContext.getCharTyImpl(), 1)));
     }
 
+    analysisResult.setExpType(node, info->getType());
+    if (info->getConstValue()) {
+        analysisResult.setExpConst(node, info->getConstValue());
+    }
     return info;
 }
 
@@ -457,16 +481,20 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
         errorLog(ErrorCode::UndefinedName, node->getStartLine(), node->getIdentifier());
         return nullptr;
     }
-    // 将Symbol信息存储到AstNode中
-    node->setSymbol(symbol);
+    // AnalysisResult is the primary binding; AST setSymbol is dual-write during migration.
+    bindSymbol(node, symbol);
 
     auto info = std::make_shared<SemanticInfo>();
     info->setType(symbol->getType());
     info->setLValueFlag(true);
+    analysisResult.setExpType(node, symbol->getType());
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
         info->setConstValue(symbol->getConstValue());
+        if (symbol->getConstValue()) {
+            analysisResult.setExpConst(node, symbol->getConstValue());
+        }
     }
 
     return info;
@@ -478,7 +506,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
         return nullptr;
     }
     int errCountBefore = getErrorCount();
-    auto funcInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getFunction()->accept(*this, context));
+    auto funcInfo = asSemInfo(node->getFunction()->accept(*this, context));
     
     if (!funcInfo || !funcInfo->getType() || !funcInfo->getType()->isFunctionTy()) {
         // 仅当函数表达式本身无错误时才报 (避免与未定义名字重复报错)
@@ -505,7 +533,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
         }
         // 检查固定参数的类型匹配
         for (size_t i = 0; i < funcType->getParamTypesCount(); ++i) {
-            auto argInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArgument(i)->accept(*this, context));
+            auto argInfo = asSemInfo(node->getArgument(i)->accept(*this, context));
             if (!argInfo) {
                 return nullptr;
             }
@@ -536,7 +564,7 @@ InfoPtr SemanticVisitor::visitFunctionCallExp(FunctionCallExp* node, ContextPtr 
         return nullptr;
     } else {
         for (size_t i = 0; i < node->getArgumentsCount(); ++i) {
-            auto argInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArgument(i)->accept(*this, context));
+            auto argInfo = asSemInfo(node->getArgument(i)->accept(*this, context));
             if (!argInfo) {
                 return nullptr;
             }
@@ -562,7 +590,7 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
         // 语法错误恢复后可能产生空子节点
         return nullptr;
     }
-    auto arrayInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getArray()->accept(*this, context));
+    auto arrayInfo = asSemInfo(node->getArray()->accept(*this, context));
     if (!arrayInfo || !arrayInfo->getType() || (!arrayInfo->getType()->isArrayTy() && !arrayInfo->getType()->isPointerTy())) {
         errorLog(ErrorCode::SubscriptNonArray, node->getStartLine());
         return nullptr;
@@ -587,8 +615,8 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
     info->setType(resultType);
     info->setLValueFlag(true);
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
 
         auto constValue = arrayInfo->getConstValue();
         for (size_t i = 0; i < node->getSubscriptsCount(); ++i) {
@@ -604,7 +632,7 @@ InfoPtr SemanticVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr contex
             }
             auto constArray = static_cast<Clang::ConstArray*>(constValue);
 
-            auto subscriptInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getSubscript(i)->accept(*this, context));
+            auto subscriptInfo = asSemInfo(node->getSubscript(i)->accept(*this, context));
             if (!subscriptInfo) {
                 // 下标表达式求值失败, 错误已由子节点记录
                 return nullptr;
@@ -633,7 +661,7 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
         // 语法错误恢复后可能产生空子节点
         return nullptr;
     }
-    auto expInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getExp()->accept(*this, context));
+    auto expInfo = asSemInfo(node->getExp()->accept(*this, context));
     if (!expInfo) {
         return nullptr;
     }
@@ -642,8 +670,8 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
     info->setType(expInfo->getType());
     info->setLValueFlag(false);
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
 
         auto expConstValue = expInfo->getConstValue();
         if (!expConstValue || !expConstValue->isConstInteger()) {
@@ -676,7 +704,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
         // 语法错误恢复后可能产生空子节点
         return nullptr;
     }
-    auto lhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getLhs()->accept(*this, context));
+    auto lhsInfo = asSemInfo(node->getLhs()->accept(*this, context));
     if (!lhsInfo) {
         return nullptr;
     }
@@ -685,8 +713,8 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
     info->setType(clangContext.getIntegerTyImpl());
     info->setLValueFlag(false);
 
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::EVALUATE_CONST) {
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.wantConst()) {
 
         auto lhsConstValue = lhsInfo->getConstValue();
         if (!lhsConstValue || !lhsConstValue->isConstInteger()) {
@@ -705,7 +733,7 @@ InfoPtr SemanticVisitor::visitBinaryExp(BinaryExp* node, ContextPtr context) {
             return info;
         }
 
-        auto rhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getRhs()->accept(*this, context));
+        auto rhsInfo = asSemInfo(node->getRhs()->accept(*this, context));
         if (!rhsInfo) {
             return nullptr;
         }
@@ -781,7 +809,7 @@ InfoPtr SemanticVisitor::visitAssignExp(AssignExp* node, ContextPtr context) {
         // 语法错误恢复后可能产生空子节点
         return nullptr;
     }
-    auto lhsInfo = std::dynamic_pointer_cast<SemanticInfo>(node->getLhs()->accept(*this, context));
+    auto lhsInfo = asSemInfo(node->getLhs()->accept(*this, context));
     if (!lhsInfo) {
         return nullptr;
     }
@@ -836,10 +864,13 @@ InfoPtr SemanticVisitor::visitForStmt(ForStmt* node, ContextPtr context) {
         node->getIteration()->accept(*this, context);
     }
 
-    auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    cloneContext->setLoopFlag(true);
-    if (node->getBody()) {
-        node->getBody()->accept(*this, cloneContext);
+    {
+        SemanticContext& sem = asSem(context);
+        SemanticContextGuard guard(sem);
+        sem.setLoopFlag(true);
+        if (node->getBody()) {
+            node->getBody()->accept(*this, context);
+        }
     }
 
     return nullptr;
@@ -850,9 +881,12 @@ InfoPtr SemanticVisitor::visitWhileStmt(WhileStmt* node, ContextPtr context) {
         node->getCondition()->accept(*this, context);
     }
 
-    auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    cloneContext->setLoopFlag(true);
-    node->getBody()->accept(*this, cloneContext);
+    {
+        SemanticContext& sem = asSem(context);
+        SemanticContextGuard guard(sem);
+        sem.setLoopFlag(true);
+        node->getBody()->accept(*this, context);
+    }
 
     return nullptr;
 }
@@ -862,9 +896,12 @@ InfoPtr SemanticVisitor::visitDoWhileStmt(DoWhileStmt* node, ContextPtr context)
         node->getCondition()->accept(*this, context);
     }
 
-    auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-    cloneContext->setLoopFlag(true);
-    node->getBody()->accept(*this, cloneContext);
+    {
+        SemanticContext& sem = asSem(context);
+        SemanticContextGuard guard(sem);
+        sem.setLoopFlag(true);
+        node->getBody()->accept(*this, context);
+    }
 
     return nullptr;
 }
@@ -884,8 +921,8 @@ InfoPtr SemanticVisitor::visitIfStmt(IfStmt* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (!semanticContext->inLoop()) {
+    SemanticContext& semanticContext = asSem(context);
+    if (!semanticContext.inLoop()) {
         errorLog(ErrorCode::BreakContinueOutsideLoop, node->getStartLine());
     }
 
@@ -893,8 +930,8 @@ InfoPtr SemanticVisitor::visitBreakStmt(BreakStmt* node, ContextPtr context) {
 }
 
 InfoPtr SemanticVisitor::visitContinueStmt(ContinueStmt* node, ContextPtr context) {
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (!semanticContext->inLoop()) {
+    SemanticContext& semanticContext = asSem(context);
+    if (!semanticContext.inLoop()) {
         errorLog(ErrorCode::BreakContinueOutsideLoop, node->getStartLine());
     }
 
@@ -902,8 +939,8 @@ InfoPtr SemanticVisitor::visitContinueStmt(ContinueStmt* node, ContextPtr contex
 }
 
 InfoPtr SemanticVisitor::visitReturnStmt(ReturnStmt* node, ContextPtr context) {
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    auto returnType = semanticContext->getType();
+    SemanticContext& semanticContext = asSem(context);
+    auto returnType = semanticContext.getType();
 
     if (node->getReturnExp()) {
         node->getReturnExp()->accept(*this, context);
@@ -944,16 +981,17 @@ static bool alwaysReturns(AstNode* node) {
 }
 
 InfoPtr SemanticVisitor::visitBlockStmt(BlockStmt* node, ContextPtr context) {
-    auto semanticContext = std::dynamic_pointer_cast<SemanticContext>(context);
-    if (semanticContext->getVisitPurpose() == SemanticContext::VisitPurpose::RESOLVE_FUNCTION_BODY_ONLY) {
-        auto cloneContext = std::dynamic_pointer_cast<SemanticContext>(context->clone());
-        cloneContext->setVisitPurpose(SemanticContext::VisitPurpose::DEFAULT);
-
-        for (size_t i = 0; i < node->getBlockItemsCount(); ++i) {
-            node->getBlockItem(i)->accept(*this, cloneContext);
+    SemanticContext& semanticContext = asSem(context);
+    if (semanticContext.functionBodyOnly()) {
+        {
+            SemanticContextGuard guard(semanticContext);
+            semanticContext.clearModes();
+            for (size_t i = 0; i < node->getBlockItemsCount(); ++i) {
+                node->getBlockItem(i)->accept(*this, context);
+            }
         }
-        
-        auto returnType = semanticContext->getType();
+
+        auto returnType = semanticContext.getType();
         if (!returnType->isVoidTy()) {
             // 函数体必须保证以 return 结束: 遍历所有语句, 任何一条保证返回即可
             if (!alwaysReturns(node)) {
@@ -1025,4 +1063,15 @@ Symbol* SemanticVisitor::createSymbol(const std::string& name, StorageClass sc, 
     curScope->addSymbol(name, result);
 
     return result;
+}
+
+void SemanticVisitor::bindSymbol(AstNode* node, Symbol* symbol) {
+    analysisResult.bindSymbol(node, symbol);
+    // Dual-write AST for IR paths that still call getSymbol() on Declarator.
+    // IdentifierExp dual-write keeps IR resolveSymbol fallback working.
+    if (auto* id = dynamic_cast<IdentifierExp*>(node)) {
+        id->setSymbol(symbol);
+    } else if (auto* decl = dynamic_cast<Declarator*>(node)) {
+        decl->setSymbol(symbol);
+    }
 }

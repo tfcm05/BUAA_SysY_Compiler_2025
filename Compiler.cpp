@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
     auto root = parse.parse();
     parse.parserLog(root.get());
 
-    // 语义分析
+    // 语义分析 → AnalysisResult (Symbol/type/const annotations)
     ClangContext clangContext;
     SemanticVisitor semanticVisitor(clangContext);
     root->accept(semanticVisitor, std::make_shared<SemanticContext>());
@@ -40,11 +40,11 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // 中间代码生成
+    // 中间代码生成 (reads AnalysisResult; IRBindings session map for Value*)
     LLVMContext llvmContext;
     Module module;
     IRBuilder builder(llvmContext);
-    IRVisitor irVisitor(module, builder, llvmContext);
+    IRVisitor irVisitor(module, builder, llvmContext, semanticVisitor.analysis());
     root->accept(irVisitor, std::make_shared<IRContext>());
     irVisitor.finalize();
 
