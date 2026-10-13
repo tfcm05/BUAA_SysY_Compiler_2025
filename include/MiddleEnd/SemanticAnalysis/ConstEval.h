@@ -1,9 +1,10 @@
 #ifndef CONST_EVAL_H
 #define CONST_EVAL_H
 
-#include "../../FrontEnd/SyntaxAnalysis/AstNode.h"
-#include "ConstValue.h"
-#include "ClangContext.h"
+#include "FrontEnd/SyntaxAnalysis/AstNode/Expression/UnaryExp.h"
+#include "FrontEnd/SyntaxAnalysis/AstNode/Expression/BinaryExp.h"
+#include "MiddleEnd/SemanticAnalysis/ConstValue.h"
+#include "MiddleEnd/SemanticAnalysis/ClangContext.h"
 
 // Compile-time integer folding for unary/binary ops (wantConst paths).
 namespace ConstEval {

@@ -153,6 +153,8 @@ tests/
 Compiler.cpp                  # 编译器入口
 ```
 
+**Include 约定：** 公共头优先 `#include "FrontEnd/..."` / `"MiddleEnd/..."`（`-Iinclude`）；AST 全集伞头为 `AstNodes.h`（Parser/实现用），Visitor 头只依赖 `AstVisitor.h` 前向声明；`DeclEnums.h` 提供 TypeSpecifier/StorageClass/TypeQualifier，避免 `Type.h` 依赖 AST `DeclSpec`。
+
 ## 设计模式
 
 ### Visitor 模式

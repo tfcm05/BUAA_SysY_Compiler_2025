@@ -5,7 +5,11 @@
 #include"include/FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
 
 #include "include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
+#include "include/Error.h"
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "include/MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
+#include "include/MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "include/MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
 #include "include/MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
 #include "include/MiddleEnd/Optimization/PassManager.h"
 #include "include/MiddleEnd/Optimization/Mem2Reg.h"

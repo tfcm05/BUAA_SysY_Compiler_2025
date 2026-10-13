@@ -3,6 +3,7 @@
 
 #include <string>
 #include <memory>
+#include "DeclEnums.h"
 #include "Type.h"
 #include "ConstValue.h"
 

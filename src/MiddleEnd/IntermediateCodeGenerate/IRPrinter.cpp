@@ -1,4 +1,7 @@
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
+#include <fstream>
+#include <iostream>
+#include <sstream>
 
 void IRPrinter::printModule(const Module& module) const {
     std::ofstream os;

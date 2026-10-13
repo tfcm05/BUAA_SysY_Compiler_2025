@@ -1,21 +1,29 @@
 #ifndef IR_VISITOR_H
 #define IR_VISITOR_H
 
-#include "../../FrontEnd/SyntaxAnalysis/AstVisitor.h"
-#include "../../FrontEnd/SyntaxAnalysis/AstNode.h"
-#include "../SemanticAnalysis/SymbolTable.h"
-#include "../SemanticAnalysis/AnalysisResult.h"
-#include "IRBuilder.h"
-#include "IRPrinter.h"
-#include "IRBindings.h"
+#include "FrontEnd/SyntaxAnalysis/AstVisitor.h"
+#include "MiddleEnd/SemanticAnalysis/AnalysisResult.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRBindings.h"
 
+#include <memory>
 #include <string>
 #include <unordered_map>
-#include <iostream>
 #include <vector>
-#include <memory>
 
+class Module;
+class IRBuilder;
+class LLVMContext;
 class BasicBlock;
+class Symbol;
+class AstNode;
+class Value;
+
+namespace Clang {
+class Type;
+}
+namespace LLVM {
+class Type;
+}
 
 class IRInfo : public Info {
 private:

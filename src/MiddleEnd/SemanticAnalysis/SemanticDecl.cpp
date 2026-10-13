@@ -1,6 +1,8 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ScopeGuard.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/DeclaratorTypeBuilder.h"
+#include "MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
+#include "MiddleEnd/SemanticAnalysis/ScopeGuard.h"
+#include "MiddleEnd/SemanticAnalysis/DeclaratorTypeBuilder.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
+#include "Error.h"
 
 InfoPtr SemanticVisitor::visitCompUnit(CompUnit* node, ContextPtr context) {
     // Single pass in source order; Guard toggles file-scope vs function modes.

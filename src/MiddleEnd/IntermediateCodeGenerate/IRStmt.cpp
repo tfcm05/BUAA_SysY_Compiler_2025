@@ -1,6 +1,12 @@
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/EnsureI1.h"
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/ArrayInitIR.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
+#include "MiddleEnd/IntermediateCodeGenerate/EnsureI1.h"
+#include "MiddleEnd/IntermediateCodeGenerate/ArrayInitIR.h"
+#include "MiddleEnd/SemanticAnalysis/Symbol.h"
+#include "MiddleEnd/SemanticAnalysis/Type.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
 
 InfoPtr IRVisitor::visitExpStmt(ExpStmt* node, ContextPtr context) {
     if (node->getExp()) {

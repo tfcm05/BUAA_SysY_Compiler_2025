@@ -1,4 +1,4 @@
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
 
 IRBuilder::IRBuilder(LLVMContext& context) : llvmContext(context), currentBlock(nullptr), currentFunction(nullptr) {}
 

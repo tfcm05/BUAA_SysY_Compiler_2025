@@ -1,16 +1,20 @@
 #ifndef SEMANTIC_VISITOR_H
 #define SEMANTIC_VISITOR_H
-#include "../../FrontEnd/SyntaxAnalysis/AstVisitor.h"
-#include "../../FrontEnd/SyntaxAnalysis/AstNode.h"
-#include "../../Error.h"
-#include "SymbolTable.h"
-#include "ClangContext.h"
-#include "ConstValue.h"
-#include "AnalysisResult.h"
+
+#include "FrontEnd/SyntaxAnalysis/AstVisitor.h"
+#include "MiddleEnd/SemanticAnalysis/SymbolTable.h"
+#include "MiddleEnd/SemanticAnalysis/ClangContext.h"
+#include "MiddleEnd/SemanticAnalysis/ConstValue.h"
+#include "MiddleEnd/SemanticAnalysis/AnalysisResult.h"
+#include "DeclEnums.h"
+
+class AstNode;
+
 #include <fstream>
-#include <iostream>
 #include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 class SemanticInfo : public Info {
 private:

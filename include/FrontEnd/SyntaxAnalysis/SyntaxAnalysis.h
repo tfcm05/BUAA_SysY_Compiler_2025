@@ -1,7 +1,7 @@
 #ifndef GRAMMATICALANALYSIS_H
 #define GRAMMATICALANALYSIS_H
 
-#include "AstNode.h"
+#include "AstNodes.h"
 #include "../LexicalAnalysis/LexicalAnalysis.h"
 
 #define CURRENT_TYPE currentToken.getTokenType()

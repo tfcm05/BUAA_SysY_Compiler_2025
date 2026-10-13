@@ -1,4 +1,4 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/Symbol.h"
+#include "MiddleEnd/SemanticAnalysis/Symbol.h"
 
 Symbol::Symbol(std::string name, StorageClass storageClass, Clang::Type* type, SymbolKind kind, Clang::ConstValue* constValue)
     : name(std::move(name)), storageClass(storageClass), type(type), kind(kind), constValue(constValue) {}

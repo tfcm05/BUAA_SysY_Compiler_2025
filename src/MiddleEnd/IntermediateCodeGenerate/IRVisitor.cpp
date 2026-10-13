@@ -1,4 +1,10 @@
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
+#include "MiddleEnd/SemanticAnalysis/Type.h"
+#include "MiddleEnd/SemanticAnalysis/Symbol.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
 
 // IRInfo Implementation
 IRInfo::IRInfo(Value* val)

@@ -1,4 +1,4 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/SymbolTable.h"
+#include "MiddleEnd/SemanticAnalysis/SymbolTable.h"
 
 std::shared_ptr<SymbolTable> curScope;
 

@@ -1,5 +1,5 @@
-#ifndef SYNTAXANALYSIS_ASTNODE_H
-#define SYNTAXANALYSIS_ASTNODE_H
+#ifndef SYNTAXANALYSIS_ASTNODES_H
+#define SYNTAXANALYSIS_ASTNODES_H
 #include "AstNode/Declaration/Declarator/Initializer/ExpInitializer.h"
 #include "AstNode/Declaration/Declarator/Initializer/ListInitializer.h"
 #include "AstNode/Declaration/Declarator/DirectDeclarator.h"

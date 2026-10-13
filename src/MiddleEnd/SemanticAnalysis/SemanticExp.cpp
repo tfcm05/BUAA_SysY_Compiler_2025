@@ -1,6 +1,8 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ScopeGuard.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ConstEval.h"
+#include "MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
+#include "MiddleEnd/SemanticAnalysis/ScopeGuard.h"
+#include "MiddleEnd/SemanticAnalysis/ConstEval.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
+#include "Error.h"
 
 InfoPtr SemanticVisitor::visitLiteralExp(LiteralExp* node, ContextPtr context) {
     SemanticContext& semanticContext = asSem(context);

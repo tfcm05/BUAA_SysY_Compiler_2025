@@ -1,5 +1,5 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/ConstValue.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ClangContext.h"
+#include "MiddleEnd/SemanticAnalysis/ConstValue.h"
+#include "MiddleEnd/SemanticAnalysis/ClangContext.h"
 
 // ConstValue implementation
 Clang::ConstValue::ConstValue(ClangContext& context, ConstKind k) : context(context), kind(k) {}

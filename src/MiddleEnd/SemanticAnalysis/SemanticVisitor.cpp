@@ -1,5 +1,8 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ScopeGuard.h"
+#include "MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
+#include "MiddleEnd/SemanticAnalysis/ScopeGuard.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
+#include "Error.h"
+#include <iostream>
 
 // SemanticInfo implementation
 SemanticInfo::SemanticInfo()

@@ -1,4 +1,4 @@
-#include "../../../../include/FrontEnd/SyntaxAnalysis/AstNode.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
 
 /*
  * Exp and derived classes

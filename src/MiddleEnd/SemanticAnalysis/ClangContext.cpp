@@ -1,6 +1,6 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/ClangContext.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/Type.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ConstValue.h"
+#include "MiddleEnd/SemanticAnalysis/ClangContext.h"
+#include "MiddleEnd/SemanticAnalysis/Type.h"
+#include "MiddleEnd/SemanticAnalysis/ConstValue.h"
 
 #include <unordered_map>
 #include <stdio.h>
