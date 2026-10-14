@@ -1,194 +1,160 @@
 # BUAA_SysY_Compiler_2025
 
-一个面向 C 语言子集的编译器，将源代码编译为 LLVM IR 文本（可链接运行）和 MIPS 汇编。
+一个面向 C 语言子集的编译器，将源代码编译为 LLVM IR 文本（可链接运行）和 MIPS 汇编。当前主开发分支按 **mini-C 前端** 演进：保留 Declarator 形 AST、双类型系统（Clang:: / LLVM::）、`printf` 等作为普通库函数调用。
 
 ## 编译与运行
 
 ```bash
-# 编译编译器 (推荐 CMake; Debug=-O0 快增量, Release=-O2)
+# 推荐 CMake（Debug=-O0 快增量；Release=-O2）
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j$(nproc)
 # Release: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
-# 若已安装 ccache, CMake 会自动设为 CMAKE_CXX_COMPILER_LAUNCHER
-# 或 (单文件链接, 开发备用): mkdir -p build && g++ -std=c++17 -O0 -Iinclude -o build/Compiler Compiler.cpp $(find src -name "*.cpp")
+# 若已安装 ccache，CMake 会自动设为 CMAKE_CXX_COMPILER_LAUNCHER
 
-# 编译源程序
-./build/Compiler [源文件]   # 默认 testfile.txt
+# 备用（单命令链接）
+mkdir -p build && g++ -std=c++17 -O0 -Iinclude -o build/Compiler \
+  Compiler.cpp $(find src -name "*.cpp")
+
+# 编译源程序（argv[1]；省略则默认 testfile.txt）
+./build/Compiler [源文件]
 # → parser.txt / symbol.txt / error.txt / llvm_ir.txt / mips.s
 
-# 链接运行 (LLVM IR 路线)
+# 链接运行（LLVM IR 路线）
 clang -w -x ir llvm_ir.txt -x none tests/runtime.c -o program && ./program
 
 # 批量测试
 ./tests/run.sh
 ```
 
+语义有错时写入 `error.txt` 并 **跳过** IR 优化与 MIPS；成功路径上 `llvm_ir.txt` 在 **全部 Pass 之后** 由驱动显式 `printModule`（不再依赖 `IRVisitor` 析构副作用）。
+
 ## 总体架构
 
 ```
-testfile.txt
+源文件 (argv / testfile.txt)
     │
     ▼
 ┌──────────────┐
-│  词法分析     │  LexicalAnalysis
-│  Lexer        │  Token 流 (关键字/运算符/字面量, 含行号)
+│  词法分析     │  LexicalAnalysis → Token 流
 └──────┬───────┘
-       │ Token
+       │
        ▼
 ┌──────────────┐
-│  语法分析     │  Parser (递归下降 LL(1))
-│  Parser       │  → AST (CompUnit 根节点, 声明按源码顺序存放)
+│  语法分析     │  Parser (递归下降) → AST（Declarator 形，声明按源码顺序）
 └──────┬───────┘
-       │ AST
+       │ AST（纯语法，不挂 Symbol*）
        ▼
 ┌──────────────┐
 │  语义分析     │  SemanticVisitor → AnalysisResult
-│  Semantic     │  单遍扫描; Symbol/类型/常量写入注解表
+│               │  符号 / 类型 / 常量注解外置；AST 保持语法形状
 └──────┬───────┘
        │ AST + AnalysisResult
        ▼
 ┌──────────────┐
 │  IR 生成      │  IRVisitor + IRBuilder + IRBindings
-│  IR Gen       │  → Module (Symbol→Value 会话映射)
+│               │  Symbol* → Value* 仅会话映射；Symbol 不持 Value*
 └──────┬───────┘
        │ Module
        ▼
 ┌──────────────┐
-│  IR 优化      │  PassManager: Mem2Reg → AS → ConstFold →
-│  Optimization│  ConstBr → DeadBlock → DeadInstr
+│  IR 优化      │  PassManager（只读/改 Module，不再 traverse AST）
+│               │  Mem2Reg → AlgebraicSimplification → IRConstantFolding
+│               │  → ConstantBranchFolding → DeadBlockElimination
+│               │  → DeadInstructionElimination
 └──────┬───────┘
        │
        ├──────────────────────────────┐
        ▼                              ▼
 ┌──────────────┐            ┌──────────────────┐
-│  IR 打印      │            │  MIPS 后端        │
-│  IRPrinter   │            │  MIPSCodeGenerator│
-│  → llvm_ir.txt│            │  (Phi消除/寄存器  │
-└──────────────┘            │   缓存/GEP偏移)   │
-                            │  → MIPSPeepholeOptimizer
-                            │  → MIPSPrinter → mips.s
+│  IRPrinter   │            │  MIPS 后端        │
+│  → llvm_ir.txt│            │  MIPSCodeGenerator│
+└──────────────┘            │  → Peephole → mips.s
                             └──────────────────┘
 ```
 
-`Compiler.cpp` 是入口，依次调用上述各阶段。语义错误时 `error.txt` 输出到文件并跳过 IR/MIPS 生成。
+阶段边界原则：**语法树纯语法 → 语义结果进 `AnalysisResult` → IR 绑定进 `IRBindings` → 优化/后端只碰 `Module`。** 只有 `Compiler.cpp` 贯穿各层。
 
 ## 目录结构
 
 ```
 src/
 ├── FrontEnd/
-│   ├── LexicalAnalysis/      # 词法分析器 (LexicalAnalysis.cpp, Token.cpp)
-│   └── SyntaxAnalysis/       # 语法分析器 (递归下降)
-│       ├── SyntaxAnalysis.cpp # Parser 实现 (parseCompUnit/parseVarDecl/parseFuncDecl/...)
-│       └── AstNode/          # AST 节点定义与 accept 实现
-│           ├── AstNode.cpp   # 基类 + CompUnit (声明按源码顺序存于 AstNodePtr 数组)
-│           ├── Declaration.cpp
-│           ├── Expression.cpp
-│           └── Statement.cpp
+│   ├── LexicalAnalysis/
+│   └── SyntaxAnalysis/          # Parser + AstNode accept 实现
 ├── MiddleEnd/
-│   ├── SemanticAnalysis/     # 语义分析 (单遍扫描, 先声明后使用)
-│   │   ├── SemanticVisitor.cpp  # 核心: Info/Context/符号辅助
-│   │   ├── SemanticDecl.cpp     # 声明/Declarator/Initializer
-│   │   ├── SemanticExp.cpp      # 表达式
-│   │   ├── SemanticStmt.cpp     # 语句
+│   ├── SemanticAnalysis/        # SemanticVisitor 拆为 Decl/Exp/Stmt + ConstEval
+│   │   ├── SemanticVisitor.cpp  # 核心 Info/Context/符号辅助
+│   │   ├── SemanticDecl/Exp/Stmt.cpp
 │   │   ├── ConstEval.cpp        # 编译期常量折叠
-│   │   ├── ClangContext.cpp   # 类型工厂
-│   │   ├── Type.cpp
-│   │   ├── Symbol.cpp         # 符号 (name/type/kind/constValue; 无 Value*)
-│   │   ├── AnalysisResult.h   # 语义注解唯一来源 (Symbol/type/const; AST 不挂 Symbol*)
-│   │   ├── ConstValue.cpp
-│   │   ├── ScopeGuard.h / DeclaratorTypeBuilder.h
-│   │   └── SymbolTable.cpp    # 作用域与符号表
-│   ├── IntermediateCodeGenerate/ # IR 生成
-│   │   ├── IRVisitor.cpp      # 核心: Info/Context/convertType
-│   │   ├── IRDecl.cpp / IRExp.cpp / IRStmt.cpp
-│   │   ├── IRBindings.h       # 会话 Symbol*→Value*
-│   │   ├── EnsureI1.h / ArrayInitIR.h  # IR 辅助
-│   │   ├── IRBuilder.cpp      # IR 指令构造器
-│   │   ├── IRPrinter.cpp      # IR 文本输出 (声明/定义区分)
-│   │   ├── Module.cpp
-│   │   ├── Type.cpp
-│   │   ├── LLVMContext.cpp
-│   │   └── Value/             # LLVM Value 体系
-│   │       ├── Value.cpp
-│   │       └── User/
-│   │           ├── User.cpp
-│   │           ├── Constant/  # ConstInt/ConstArray/ConstString/GlobalValue
-│   │           └── Instruction/ # 算术逻辑/控制流/内存访问/函数调用
-│   └── Optimization/         # IR 优化 Pass
-│       ├── Pass.h / PassManager.h          # Module 级 Pass 接口与编排
-│       ├── IRReplaceUses.cpp               # 安全操作数替换 (扫描式 use-def)
-│       ├── Mem2Reg.cpp                     # 标量 alloca→SSA (单块线性 + 跨块 IDF/Phi)
-│       ├── AlgebraicSimplification.cpp     # 代数化简 (已接入)
-│       ├── IRConstantFolding.cpp           # 常量折叠 (已接入)
-│       ├── ConstantBranchFolding.cpp       # 常量分支化简 (已接入)
-│       ├── DeadBlockElimination.cpp        # 死基本块消除 (已接入; Phi 块合并已门控)
-│       └── DeadInstructionElimination.cpp  # 死指令消除 (已接入)
-├── BackEnd/
-│   └── MIPS/                 # MIPS 后端
-│       ├── MIPSCodeGenerator.cpp   # 代码生成 (Phi消除/寄存器缓存/栈帧)
-│       ├── MIPSPeepholeOptimizer.cpp # 窥孔优化 (立即数/冗余load/跳转/强度归约)
-│       └── MIPS.h / MIPSPrinter   # 汇编输出
-├── Error.cpp                 # 错误码与错误输出
-└── ...
+│   │   ├── ClangContext.cpp / Type.cpp / Symbol.cpp / SymbolTable.cpp
+│   │   └── ScopeGuard / DeclaratorTypeBuilder
+│   ├── IntermediateCodeGenerate/
+│   │   ├── IRVisitor.cpp + IRDecl/IRExp/IRStmt.cpp
+│   │   ├── IRBuilder / IRPrinter / Module / LLVMContext / Type
+│   │   └── Value/               # Constant / Instruction 层次
+│   └── Optimization/
+│       ├── Pass.h / PassManager.h
+│       ├── IRReplaceUses.cpp    # 扫描式操作数替换（不依赖未维护 users）
+│       ├── Mem2Reg.cpp          # 标量 alloca→SSA（单块 + 跨块 IDF/Phi）
+│       ├── AlgebraicSimplification / IRConstantFolding
+│       ├── ConstantBranchFolding / DeadBlockElimination
+│       └── DeadInstructionElimination
+├── BackEnd/MIPS/                # 只读 Module → mips.s
+└── Error.cpp
 include/
-├── FrontEnd/                  # 与 src 同构的头文件
+├── DeclEnums.h                  # TypeSpecifier / StorageClass / TypeQualifier（中性枚举）
+├── FrontEnd/
+│   └── SyntaxAnalysis/
+│       ├── AstNodes.h           # AST 全集伞头（仅 Parser / 实现 .cpp 使用）
+│       ├── AstVisitor.h         # 默认空 visit*；Visitor 公开头只依赖此前向接口
+│       └── AstNode/             # 各结点头（不挂 Symbol*）
 ├── MiddleEnd/
 │   ├── SemanticAnalysis/
+│   │   ├── AnalysisResult.h     # 语义注解唯一来源
+│   │   ├── SemanticVisitor.h
+│   │   └── Symbol.h             # name/type/kind/constValue；无 Value*
 │   ├── IntermediateCodeGenerate/
-│   │   ├── IRBuilder.h
-│   │   ├── IRPrinter.h
-│   │   ├── Module.h
-│   │   ├── LLVMContext.h
-│   │   └── LLVM/              # IR 类型与 Value 层次 (Type.h, Value/, BasicBlock.h, Argument.h)
-│   └── Optimization/          # 优化 Pass 头文件 (含 Mem2Reg)
-├── BackEnd/
-│   └── MIPS/                  # MIPSCodeGenerator.h / MIPSPeepholeOptimizer.h / MIPS.h
-├── Error.h                   # ErrorCode 枚举 (按编译阶段分类)
-└── ...
+│   │   ├── IRBindings.h         # 会话 Symbol* → Value*
+│   │   └── LLVM/ …
+│   └── Optimization/
+└── BackEnd/MIPS/
 tests/
-├── run.sh                    # 测试脚本
-├── runtime.c                 # C 运行时库 (getint/putint)
-└── cases/                    # 28 个测试用例 (*.sy + *.out/*.err)
-Compiler.cpp                  # 编译器入口
+├── run.sh
+├── runtime.c                    # getint / putint
+└── cases/                       # *.sy + *.out / *.err / *.in
+Compiler.cpp
+CMakeLists.txt
 ```
 
-**Include 约定：** 公共头优先 `#include "FrontEnd/..."` / `"MiddleEnd/..."`（`-Iinclude`）；AST 全集伞头为 `AstNodes.h`（Parser/实现用），Visitor 头只依赖 `AstVisitor.h` 前向声明；`DeclEnums.h` 提供 TypeSpecifier/StorageClass/TypeQualifier，避免 `Type.h` 依赖 AST `DeclSpec`。
+### Include 约定
 
-## 设计模式
+- 编译用 `-Iinclude`；公共头优先 `#include "FrontEnd/..."` / `"MiddleEnd/..."` / `"DeclEnums.h"`。
+- **`AstNodes.h`**：整棵 AST 伞头，只给 Parser 与实现 `.cpp`；`SemanticVisitor` / `IRVisitor` 公开头不吃伞头。
+- **`DeclEnums.h`**：声明相关枚举，避免 `Clang::Type.h` 依赖 AST 的 `DeclSpec`。
+- **允许**：`IRBindings` 挂 `Symbol*` / `Value*`；Opt / BackEnd 只依赖 `Module`。
+- **禁止**：语义头依赖 `LLVM::Value`；AST 结点挂 `Symbol*`；优化 Pass 再 traverse 源语言 AST。
 
-### Visitor 模式
+## 设计要点
 
-语义分析和 IR 生成两次遍历 AST，通过 `AstVisitor` 虚接口实现：
+### 注解外置（相对「黑板 Symbol」）
 
-```cpp
-// 每个节点实现 accept, 转发到 visitor 的对应 visit 方法
-InfoPtr AstNode::accept(AstVisitor& visitor, ContextPtr context);
+| 数据 | 放哪 | 不放哪 |
+|------|------|--------|
+| 语法形状 | AST | — |
+| Symbol / 类型 / 常量 | `AnalysisResult` | AST 字段、`Symbol::Value*` |
+| IR 映射 | `IRBindings`（会话） | `Symbol` 成员 |
 
-// visitor 为每种节点提供 visit 重载
-class AstVisitor {
-    virtual InfoPtr visitBinaryExp(BinaryExp*, ContextPtr) = 0;
-    virtual InfoPtr visitIfStmt(IfStmt*, ContextPtr) = 0;
-    // ...
-};
+IR 生成时结果仍「皆是 Value」；去掉的是让语义层 `Symbol` 长住 `Value*`，以免阶段耦合与所有权不清。
 
-// Context 传递上文 (函数返回类型/变量类型/求值模式等), 子节点可共用
-// Info 传回下文 (类型/常量值/IR Value 等), 由父节点消费
-```
+### Visitor
 
-两种具体实现：
-- `SemanticVisitor` + `SemanticContext`/`SemanticInfo`：类型检查、作用域管理、常量折叠；`Symbol*` 只写入 `AnalysisResult`（AST 纯语法）
-- `IRVisitor` + `IRContext`/`IRInfo`：只从 `AnalysisResult` 解析符号，经 `IRBindings` 映射到 `Value*`
+语义与 IR 仍是双遍 Visitor（`Decl` / `Exp` / `Stmt` 实现拆文件）。`SemanticContext` / `IRContext` 用显式 bool（如 `wantConst` / `useLocation`）+ `*ContextGuard` 就地改写再恢复，**不再**用 `VisitPurpose` 枚举当控制流 DSL，热路径避免反复 `clone()` Context。`AstVisitor` 提供默认空 `visit*`，新增结点不必改所有 Visitor。
 
-`SemanticContext` / `IRContext` 使用显式 bool 字段（`wantConst` / `useLocation` 等），配合 `*ContextGuard` 就地改写再恢复，避免热路径上反复 `clone()`。`AstVisitor` 提供默认空 `visit*`，新增结点不必改所有 Visitor。
+### Factory / 类型唯一化
 
-### Factory 模式
-
-类型对象通过工厂唯一化，避免重复创建等价类型：
-
-- `ClangContext` → `Clang::Type*`（语义阶段类型，如 `IntegerType`、`ArrayType`、`PointerType`、`FunctionType`）
-- `LLVMContext` → `LLVM::Type*`（IR 阶段类型，如 `i32`、`[N x i32]`、`i8*`）
-- 常量值也通过 `ClangContext` 唯一化：`getConstIntegerImpl(val)`、`getConstArrayImpl(elements)`
+- `ClangContext` → `Clang::Type*`（含 **FunctionType 按签名 uniquify**）
+- `LLVMContext` → `LLVM::Type*`（双侧 FunctionType 同样按 `(ret, params…, variadic)` get-or-create）
+- `canAssign` 等可依赖类型指针相等，前提是同签名只对应一个 `FunctionType` 实例
 
 ## 语言特性
 
@@ -197,141 +163,71 @@ class AstVisitor {
 | 特性 | 说明 |
 |------|------|
 | 基本类型 | `int`、`char`、`void` |
-| 存储类 | `static`（静态存储期）、默认（自动存储期） |
-| 类型限定符 | `const`（只读限定，局部 const 允许非常量初始化） |
-| 变量声明 | 多声明符 `int a, b, c;`、初始化器 `int x = 1;` |
-| 数组 | 多维 `int a[2][3];`、嵌套初始化 `int m[2][2] = {{1,2},{3,4}};`、部分初始化补零、平铺 `{1,2,3,4}` |
-| 指针 | `char *p;`、指针声明符 `*` |
-| 函数 | 声明 `int f(int, int);`、定义 `int f(int a, int b) { ... }`、先声明后定义 |
-| 变参函数 | `int printf(const char *, ...);` — 支持外部库函数调用 |
+| 存储类 | `static`；默认自动存储期 |
+| 类型限定符 | `const`（只读限定；局部 const 允许非常量初始化） |
+| 变量 / 数组 | 多声明符、多维数组、嵌套/平铺初始化、缺省补零 |
+| 指针 | 声明符 `*`；一元 **`&`（取地址）** / **`*`（解引用）**；形参会先 alloca 再 store，便于 `&param` |
+| 函数 | 原型 / 定义、先声明后定义；变参如 `printf(const char *, ...)` 作 **普通库调用**（无前端格式串特判） |
 | 控制流 | `if/else`、`for`、`while`、`do-while`、`break`、`continue`、`return` |
-| 表达式 | 算术/关系/逻辑运算、赋值、逗号、数组下标、函数调用 |
-| 字符串 | 字符串字面量 `"hello\n"`（lexer 统一转义处理） |
-| 注释 | `//` 单行、`/* */` 多行 |
+| 表达式 | 算术/关系/逻辑、赋值、逗号、下标、调用、一元 `&`/`*` |
+| 字符串 / 注释 | 字面量与转义；`//`、`/* */` |
 
-### 语义规则（与 C 一致）
+### 语义规则（摘要）
 
-- **单遍扫描**：按源码顺序处理，先声明后使用（前向引用需先声明原型）
-- **函数声明**：允许重复声明/原型+定义复用同一符号；重复定义由链接器报错
-- **static 存储期**：`static` 变量全局存储，初始化器必须为常量表达式
-- **const 限定符**：`const` 是只读限定符而非编译期常量；局部 `const` 可用非常量表达式初始化；全局/static `const` 初始化器必须常量
-- **数组初始化**：嵌套 `{{1,2},{3,4}}` 与平铺 `{1,2,3,4}` 均可；缺省元素补零（全局/局部一致）
-- **return 分析**：`alwaysReturns` 递归判定 if/else 双分支均返回、块内任意位置 return 等情况
-- **常量折叠**：`wantConst` 模式下编译期计算常量表达式（算术/比较/逻辑）
-- **短路求值**：`&&`/`||` 在 IR 生成时生成分支结构，左操作数确定结果时不求值右操作数
-- **数组退化**：数组传参退化为指针，GEP 计算元素地址
+- 单遍、先声明后使用；函数允许重复原型，重复定义交链接器
+- `static` / 全局初始化须为常量表达式；短路 `&&`/`||` 在 IR 中用分支 + phi
+- 数组传参退化为指针；下标对指针槽会先 load 再 GEP
 
-### 错误码（按编译阶段分类）
+### 已知缺口（相对完整 mini-C）
 
-```cpp
-// 词法错误
-IllegalChar                // 非法字符
+括号声明符 `int (*fp)(int)`、指针算术、`.` / `->`、`sizeof`、`++`/`--`、`struct` / `typedef` / `enum` / `switch` 尚未实现。下一优先建议：括号 Declarator → 再聚合类型。
 
-// 语法错误
-MissingSemicolon           // 缺少分号
-MissingRightParen         // 缺少右小括号
-MissingRightBracket       // 缺少右中括号
+### 错误码
 
-// 语义错误: 声明与作用域
-RedefinedName             // 名字重定义
-UndefinedName             // 未定义的名字
+按阶段分类的有意义枚举（`IllegalChar`、`MissingSemicolon`、`UndefinedName`、`ParamCountMismatch`、…），输出到 `error.txt`：`行号 中文原因 '符号名'`。完整列表见 `include/Error.h`。
 
-// 语义错误: 函数调用
-ParamCountMismatch        // 函数参数个数不匹配
-ParamTypeMismatch         // 函数参数类型不匹配
-CallNonFunction           // 对非函数类型进行调用
+## IR 与优化
 
-// 语义错误: 返回语句
-ReturnTypeMismatch        // return语句与函数返回类型不匹配
-MissingReturn             // 有返回值的函数缺少return语句
+### IR 类型对应
 
-// 语义错误: 常量与初始化
-ConstAssignment           // 不能改变常量的值
-GlobalStaticNonConstInit  // 全局或静态变量初始化必须为常量表达式
-ConstDivByZero            // 常量表达式除以零
+| IR | C |
+|----|---|
+| `i32` / `i8` | `int` / `char` |
+| `[N x i32]` | `int[N]` |
+| `i8*` 等 | 指针 |
+| 函数类型 | 含可变参数 |
 
-// 语义错误: 数组
-ArraySizeNotConst         // 数组大小不是常量
-ArraySizeNotPositive      // 数组大小必须为正
-SubscriptNonArray         // 对非数组或非指针类型使用下标
+### Pass 流水线（已全部接入 `Compiler.cpp`）
 
-// 语义错误: 赋值
-AssignmentToNonLValue     // 赋值左侧不是左值
+| 顺序 | Pass | 作用 |
+|------|------|------|
+| 1 | **Mem2Reg** | 可提升标量 alloca → SSA（单块线性；跨块迭代支配边界插 Phi + rename）。不提升取过地址 / 类型不匹配者 |
+| 2 | AlgebraicSimplification | `x+0`、`x*1`、`x*0` 等 |
+| 3 | IRConstantFolding | 常量运算 / icmp 折叠 |
+| 4 | ConstantBranchFolding | `br i1 true/false` → 直跳 |
+| 5 | DeadBlockElimination | 不可达块；后继以 Phi 开头时跳过危险合并 |
+| 6 | DeadInstructionElimination | 无副作用且结果无引用的安全白名单删除 |
 
-// 语义错误: 控制流
-BreakContinueOutsideLoop  // 非循环块中使用break/continue
-```
-
-错误输出到 `error.txt`，格式：`行号 中文原因 '符号名'`
-
-## IR 类型系统
-
-LLVM IR 的类型层次：
-
-| IR 类型 | 对应 C 类型 | 说明 |
-|---------|-----------|------|
-| `i32` | `int` | 32 位整数 |
-| `i8` | `char` | 8 位字符 |
-| `[N x i32]` | `int[N]` | 数组 |
-| `i8*` | `char*` | 指针 |
-| `i32 (i32, ...)*` | 函数指针 | 含可变参数 |
-
-## 优化 Pass
-
-IR 生成后、打印前执行优化，采用独立 Pass 设计：
-
-| Pass | 文件 | 状态 | 作用 |
-|------|------|------|------|
-| 代数化简 | `AlgebraicSimplification.cpp` | ✅ 已接入 | `x + 0 → x`、`x * 1 → x`、`x * 0 → 0` 等 |
-| IR 常量折叠 | `IRConstantFolding.cpp` | 📦 已实现未接入 | `add i32 1, 2` → `i32 3`、`icmp eq 1, 1` → `i1 1` |
-| 死指令消除 | `DeadInstructionElimination.cpp` | 📦 已实现未接入 | 删除结果无引用且无副作用的指令 |
-| 常量分支化简 | `ConstantBranchFolding.cpp` | 📦 已实现未接入 | `br i1 true, %A, %B` → `br label %A` |
-| 死基本块消除 | `DeadBlockElimination.cpp` | 📦 已实现未接入 | 删除不可达基本块、合并无条件跳转链 |
-
-设计执行顺序：代数化简 → 常量折叠 → 死指令消除 → 常量分支化简 → 死基本块消除（当前仅代数化简接入 Compiler.cpp）
+操作数替换经 `IRReplaceUses` 扫描式完成（不依赖未维护的 `users` 列表）。打印发生在全部 Pass 之后。尚未做：完整 GVN、循环优化、函数内联；下一性价比方向仍是加强 Mem2Reg / CSE 等。
 
 ## MIPS 后端
 
-IR 生成后，经 MIPS 后端输出 `mips.s`（32 位 O32 调用约定）：
+只读 `Module` → `MIPSCodeGenerator`（Phi 消除、寄存器缓存、GEP 偏移）→ `MIPSPeepholeOptimizer` → `mips.s`（O32：`$a0`–`$a3` + 栈上传参）。中端优化与后端窥孔分工，避免在 `IRVisitor` 里塞优化。
 
-| 阶段 | 文件 | 说明 |
-|------|------|------|
-| 代码生成 | `MIPSCodeGenerator.cpp` | Phi 消除（前驱 terminator 前插入 copy 到 phi 栈槽）、基本块级寄存器缓存（T0-T7，耗尽自动溢出）、GEP 精确偏移、caller-saved 保护、立即数优化 |
-| 窥孔优化 | `MIPSPeepholeOptimizer.cpp` | P1 立即数折叠、P2 冗余 lw/sw 消除、P3 跳转优化、P4 强度归约（mul/div 2^k）、P5 死指令消除、P6 move 消除，多 pass 迭代到 fixpoint |
-| 输出 | `MIPS.h` (MIPSPrinter) | 生成 MIPS 汇编文本 |
+## 测试与运行时
 
-函数调用约定：前 4 个参数经 `$a0`–`$a3` 传递，更多参数预留栈空间（`16 + 4*(n-4)` 字节）。
+`tests/run.sh`：对 `tests/cases/` 下用例编译 → 匹配 `.err` 或链接 `runtime.c` 跑 IR → 匹配 `.out`。
 
-## 测试
+`tests/runtime.c` 提供 `getint` / `putint`；用户程序也可外部声明变参 `printf`，按普通 `call` 处理。
 
-28 个测试用例覆盖：
+用例覆盖基础、控制流、数组、常量/`static`、函数、`printf`、若干错误路径等。指针取地址/解引用已在语言与 IR 中支持；本地可用含 `&`/`*` 的源文件自行验证。
 
-- 基础：`hello`、`scope`、`voidfunc`
-- 控制：`for`、`while`、`dowhile`、`break`、`continue`、`logic`
-- 数组：`arr2d`（嵌套 `{{1,2,3},{4,5,6}}`）、`arrparam`、`constarr`
-- 常量：`constexpr`、`constlocal`、`staticzero`、`globalinit`
-- 函数：`fib`、`getint`
-- for 改进：`forinit`（变量共享）、`forshadow`（遮蔽）
-- return 分析：`retif`（if/else 返回）、`retif2`（无 else）、`retmid`（中间返回）、`retnest`（嵌套）、`retvoid`（void 错误）
-- 外部函数：`printf`（外部 printf 变参调用）
-- 错误用例：`undefvar`（未定义名字）、`retvoid`（类型不匹配）
+## 工程编译注意
 
-测试脚本 `tests/run.sh` 对每个用例：编译 → `error.txt` 匹配 `.err` 或 IR 链接运行 → 输出匹配 `.out`。
-
-## 运行时库
-
-`tests/runtime.c` 提供基本 IO：
-```c
-int getint();    // scanf("%d")
-void putint(int); // printf("%d")
-```
-
-用户程序通过外部声明使用：
-```c
-void putint(int a);
-int getint();
-int printf(const char *, ...);
-```
+- **Debug**（默认）：`-O0 -g`，便于改编译器本身时的增量速度
+- **Release**：`-O2`
+- **ccache**：检测到则自动作为 compiler launcher
+- 拆分 Decl/Exp/Stmt 与瘦 Visitor 头后，改单文件重编面更小；公开头尽量前向声明，重 include 留在 `.cpp`
 
 ## 迭代过程
 
