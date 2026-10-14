@@ -20,7 +20,7 @@ InfoPtr IRVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr context) {
         return nullptr;
     }
 
-    if (symbol->getKind() == Symbol::FUNCTION || symbol->getKind() == Symbol::PARAMETER) {
+    if (symbol->getKind() == Symbol::FUNCTION) {
         return std::make_shared<IRInfo>(value);
     } 
     
@@ -136,12 +136,32 @@ InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
         return arrayDims;
     };
 
+    // Resolve base address: array object vs pointer variable (incl. decayed params).
+    auto resolveSubscriptBase = [&](Value* loc) -> Value* {
+        if (!loc || !loc->getType() || !loc->getType()->isPointer()) {
+            return nullptr;
+        }
+        auto* locTy = static_cast<LLVM::PointerType*>(loc->getType());
+        auto* pointee = locTy->getPointedType();
+        if (pointee && pointee->isArray()) {
+            return loc; // pointer to array object
+        }
+        if (pointee && pointee->isPointer()) {
+            // Slot holds a pointer (int *p / int a[]): load then index.
+            return builder.createLoad(loc);
+        }
+        return loc;
+    };
+
     if (irContext.useLocation()) {
         auto arrayIRInfo = asIRInfo(node->getArray()->accept(*this, context));
         if (!arrayIRInfo || !arrayIRInfo->getValue()) {
             return nullptr;
         }
-        auto ptr = arrayIRInfo->getValue();
+        auto ptr = resolveSubscriptBase(arrayIRInfo->getValue());
+        if (!ptr || !ptr->getType() || !ptr->getType()->isPointer()) {
+            return nullptr;
+        }
         auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
         size_t arrayDims = countArrayDims(ptrType->getPointedType());
         if (arrayDims >= 1 && arrayDims >= node->getSubscriptsCount()) {
@@ -160,7 +180,10 @@ InfoPtr IRVisitor::visitSubscriptExp(SubscriptExp* node, ContextPtr context) {
     if (!arrayIRInfo || !arrayIRInfo->getValue()) {
         return nullptr;
     }
-    auto ptr = arrayIRInfo->getValue();
+    auto ptr = resolveSubscriptBase(arrayIRInfo->getValue());
+    if (!ptr || !ptr->getType() || !ptr->getType()->isPointer()) {
+        return nullptr;
+    }
     auto ptrType = static_cast<LLVM::PointerType*>(ptr->getType());
     size_t arrayDims = countArrayDims(ptrType->getPointedType());
     if (arrayDims >= 1 && arrayDims >= node->getSubscriptsCount()) {
@@ -175,13 +198,53 @@ InfoPtr IRVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
         // 语法错误恢复后可能产生空子节点
         return nullptr;
     }
+
+    IRContext& irContext = asIR(context);
+    auto op = node->getUnaryOp();
+
+    // &e: evaluate operand as location (address), result is the pointer value (rvalue).
+    if (op == UnaryExp::UnaryOp::ADDR) {
+        std::shared_ptr<IRInfo> locInfo;
+        {
+            IRContextGuard guard(irContext);
+            irContext.setUseLocation(true);
+            irContext.setCreateGlobal(false);
+            locInfo = asIRInfo(node->getExp()->accept(*this, context));
+        }
+        if (!locInfo || !locInfo->getValue()) {
+            return nullptr;
+        }
+        return std::make_shared<IRInfo>(locInfo->getValue());
+    }
+
+    // *e: operand is a pointer value; as location return the pointer, else load.
+    if (op == UnaryExp::UnaryOp::DEREF) {
+        std::shared_ptr<IRInfo> ptrInfo;
+        {
+            IRContextGuard guard(irContext);
+            irContext.clearModes();
+            ptrInfo = asIRInfo(node->getExp()->accept(*this, context));
+        }
+        if (!ptrInfo || !ptrInfo->getValue()) {
+            return nullptr;
+        }
+        auto ptr = ptrInfo->getValue();
+        if (!ptr->getType() || !ptr->getType()->isPointer()) {
+            return nullptr;
+        }
+        if (irContext.useLocation()) {
+            return std::make_shared<IRInfo>(ptr);
+        }
+        return std::make_shared<IRInfo>(builder.createLoad(ptr));
+    }
+
     auto expIRInfo = asIRInfo(node->getExp()->accept(*this, context));
     if (!expIRInfo) {
         return nullptr;
     }
     auto expValue = expIRInfo->getValue();
 
-    switch (node->getUnaryOp()) {
+    switch (op) {
         case UnaryExp::UnaryOp::PLUS:
             return std::make_shared<IRInfo>(expValue);
         case UnaryExp::UnaryOp::MINU: {

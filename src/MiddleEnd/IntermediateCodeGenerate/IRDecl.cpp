@@ -117,7 +117,7 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
             bindings.set(funcSymbol, function);
         }
 
-        // 为形参创建 Argument
+        // Arguments: copy into allocas so &param is a valid location (C semantics).
         auto funcDeclarator = dynamic_cast<FuncDeclarator*>(node->getDeclarator());
         for (size_t i = 0; i < funcDeclarator->getParametersCount(); ++i) {
             auto paramDecl = funcDeclarator->getParameter(i);
@@ -125,8 +125,11 @@ InfoPtr IRVisitor::visitFunctionDecl(FunctionDecl* node, ContextPtr context) {
             if (!paramSymbol || paramSymbol->getKind() != Symbol::PARAMETER) {
                 continue;
             }
-            auto arg = builder.createArgument(convertType(paramSymbol->getType()));
-            bindings.set(paramSymbol, arg);
+            auto llvmTy = convertType(paramSymbol->getType());
+            auto arg = builder.createArgument(llvmTy);
+            auto allocaInst = builder.createAlloca(llvmTy);
+            builder.createStore(arg, allocaInst);
+            bindings.set(paramSymbol, allocaInst);
         }
 
         node->getBody()->accept(*this, context);

@@ -3,7 +3,7 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
-#include "../include/Error.h"
+#include "Error.h"
 
 namespace {
     struct ErrorInfo {
@@ -43,6 +43,8 @@ std::string errorCodeToString(ErrorCode code) {
     case ArraySizeNotPositive:      return "数组大小必须为正";
     case SubscriptNonArray:         return "对非数组或非指针类型使用下标";
     case AssignmentToNonLValue:     return "赋值左侧不是左值";
+    case AddressOfNonLValue:       return "对非左值取地址";
+    case DerefNonPointer:          return "对非指针类型解引用";
     case BreakContinueOutsideLoop: return "非循环块中使用break和continue语句";
     default: return "未知错误";
     }

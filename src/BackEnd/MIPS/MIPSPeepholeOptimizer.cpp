@@ -1,4 +1,4 @@
-#include "../../../include/BackEnd/MIPS/MIPSPeepholeOptimizer.h"
+#include "BackEnd/MIPS/MIPSPeepholeOptimizer.h"
 
 #include <algorithm>
 #include <cstdint>

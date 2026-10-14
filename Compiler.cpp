@@ -1,25 +1,25 @@
 #include<iostream>
 #include<fstream>
 
-#include"include/FrontEnd/LexicalAnalysis/LexicalAnalysis.h"
-#include"include/FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
+#include "FrontEnd/LexicalAnalysis/LexicalAnalysis.h"
+#include "FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
 
-#include "include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
-#include "include/Error.h"
-#include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
-#include "include/MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
-#include "include/MiddleEnd/IntermediateCodeGenerate/Module.h"
-#include "include/MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
-#include "include/MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
-#include "include/MiddleEnd/Optimization/PassManager.h"
-#include "include/MiddleEnd/Optimization/Mem2Reg.h"
-#include "include/MiddleEnd/Optimization/AlgebraicSimplification.h"
-#include "include/MiddleEnd/Optimization/IRConstantFolding.h"
-#include "include/MiddleEnd/Optimization/ConstantBranchFolding.h"
-#include "include/MiddleEnd/Optimization/DeadBlockElimination.h"
-#include "include/MiddleEnd/Optimization/DeadInstructionElimination.h"
-#include "include/BackEnd/MIPS/MIPSCodeGenerator.h"
-#include "include/BackEnd/MIPS/MIPSPeepholeOptimizer.h"
+#include "MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
+#include "Error.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
+#include "MiddleEnd/Optimization/PassManager.h"
+#include "MiddleEnd/Optimization/Mem2Reg.h"
+#include "MiddleEnd/Optimization/AlgebraicSimplification.h"
+#include "MiddleEnd/Optimization/IRConstantFolding.h"
+#include "MiddleEnd/Optimization/ConstantBranchFolding.h"
+#include "MiddleEnd/Optimization/DeadBlockElimination.h"
+#include "MiddleEnd/Optimization/DeadInstructionElimination.h"
+#include "BackEnd/MIPS/MIPSCodeGenerator.h"
+#include "BackEnd/MIPS/MIPSPeepholeOptimizer.h"
 
 #include <memory>
 

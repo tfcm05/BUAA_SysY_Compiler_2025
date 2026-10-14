@@ -1,5 +1,5 @@
-#include"../../../include/FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
-#include"../../../include/Error.h"
+#include "FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
+#include "Error.h"
 #include<fstream>
 #include<sstream>
 #include<iostream>
@@ -18,10 +18,11 @@ CompUnitPtr Parser::parseCompUnit() {
 
     // 交替解析任意顺序的顶层声明 (变量声明与函数声明可交错出现)
     // main 可出现在任意位置 (int main)
-    while (match(CONSTTK) || match(VOIDTK) || (match(INTTK) && (match(MAINTK, 1) || match(IDENFR, 1)))) {
+    while (match(CONSTTK) || match(VOIDTK) || match(CHARTK) || match(STATICTK) || match(INTTK) ||
+           looksLikeVarDecl() || looksLikeFuncDecl()) {
         if (match(INTTK) && match(MAINTK, 1)) {
             node->addDecl(parseMainFuncDecl());
-        } else if (match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
+        } else if (looksLikeVarDecl()) {
             node->addDecl(parseVarDecl());
         } else {
             node->addDecl(parseFuncDecl());
@@ -71,6 +72,50 @@ bool Parser::match(TokenType expected) {
     return CURRENT_TYPE == expected;
 }
 
+TokenType Parser::tokenTypeAt(int offset) {
+    if (offset <= 0) {
+        return CURRENT_TYPE;
+    }
+    return lexicalAnalysis.peekTokenAt(static_cast<size_t>(offset - 1)).getTokenType();
+}
+
+static bool isDeclSpecToken(TokenType t) {
+    return t == INTTK || t == VOIDTK || t == CHARTK || t == CONSTTK || t == STATICTK;
+}
+
+bool Parser::looksLikeVarDecl() {
+    if (!isDeclSpecToken(CURRENT_TYPE)) {
+        return false;
+    }
+    int k = 0;
+    while (isDeclSpecToken(tokenTypeAt(k))) {
+        ++k;
+    }
+    while (tokenTypeAt(k) == MULT) {
+        ++k;
+    }
+    if (tokenTypeAt(k) != IDENFR) {
+        return false;
+    }
+    // Nested function defs not supported; ID ( means function, not local var.
+    return tokenTypeAt(k + 1) != LPARENT;
+}
+
+bool Parser::looksLikeFuncDecl() {
+    if (!isDeclSpecToken(CURRENT_TYPE)) {
+        return false;
+    }
+    int k = 0;
+    while (isDeclSpecToken(tokenTypeAt(k))) {
+        ++k;
+    }
+    while (tokenTypeAt(k) == MULT) {
+        ++k;
+    }
+    return tokenTypeAt(k) == IDENFR && tokenTypeAt(k + 1) == LPARENT;
+}
+
+
 void Parser::expect(TokenType expect) {
     if (!match(expect)) {
         // 错误处理
@@ -116,13 +161,14 @@ DeclSpec Parser::parseDeclSpec() {
     return declSpec;
 }
 
-DeclaratorPtr Parser::parseDeclarator() {
+// Direct / pointer declarator without initializer (C: init wraps the whole declarator).
+DeclaratorPtr Parser::parseDeclaratorNoInit() {
     size_t startLine = CURRENT_LINE;
 
     // 指针修饰: C 声明符中的 * (如 const char *format 中的 * 属于 format 的声明符)
     if (match(MULT)) {
         expect(MULT);
-        auto inner = parseDeclarator();
+        auto inner = parseDeclaratorNoInit();
         return std::make_unique<PointerDeclarator>(std::move(inner), startLine);
     }
 
@@ -131,7 +177,7 @@ DeclaratorPtr Parser::parseDeclarator() {
         declarator = std::make_unique<IdentDeclarator>(CURRENT_VALUE, startLine);
         expect(IDENFR);
     }
-    
+
     if (match(LBRACK)) {
         // 数组 (支持多维)
         std::vector<ExpPtr> arraySizeList;
@@ -171,19 +217,24 @@ DeclaratorPtr Parser::parseDeclarator() {
         }
     }
 
-    if (match(ASSIGN)) {
-        expect(ASSIGN);
-        declarator = std::make_unique<InitialDeclarator>(std::move(declarator), parseInitializer(), startLine);
-    }
-
     // C abstract declarator: 函数原型可省略参数名 (如 void putint(int);)
-    // 未匹配到标识符且无数组/函数修饰时, 生成匿名标识符占位, 使 
-    // visitParameterDecl 的 getDeclarator()->accept() 不因空指针崩溃
     if (!declarator) {
         declarator = std::make_unique<IdentDeclarator>(
             "__anon_param_" + std::to_string(startLine), startLine);
     }
 
+    return declarator;
+}
+
+DeclaratorPtr Parser::parseDeclarator() {
+    size_t startLine = CURRENT_LINE;
+    auto declarator = parseDeclaratorNoInit();
+    // Initializer wraps the full declarator: int *p = &x → Init(Pointer(Ident), ...)
+    if (match(ASSIGN)) {
+        expect(ASSIGN);
+        declarator = std::make_unique<InitialDeclarator>(
+            std::move(declarator), parseInitializer(), startLine);
+    }
     return declarator;
 }
 
@@ -280,7 +331,7 @@ BlockStmtPtr Parser::parseBlockStmt() {
             // 语法错误: 块未闭合, 直接终止避免死循环
             break;
         }
-        if (match(STATICTK) || match(CONSTTK) || (match(INTTK) && match(IDENFR, 1) && !match(LPARENT, 2))) {
+        if (looksLikeVarDecl()) {
             node->addBlockItem(parseVarDecl());
         } else {
             node->addBlockItem(parseStmt());
@@ -331,7 +382,7 @@ ForStmtPtr Parser::parseForStmt() {
     if (!match(SEMICN)) {
         // for(int i = 0; cond; step) 形式的初始化声明 (SysY 文法 InitStmt 可为声明)
         // C 语法: for 头声明只能是普通/[const] 变量声明, 不允许 static
-        if (match(INTTK) || (match(CONSTTK) && match(INTTK, 1))) {
+        if (looksLikeVarDecl()) {
             node->setInitial(parseVarDecl()); // parseVarDecl 内部消费 ';'
             declInit = true;
         } else {
@@ -583,6 +634,14 @@ ExpPtr Parser::parseUnaryExp() {
         size_t sl = CURRENT_LINE;
         expect(NOT);
         return std::make_unique<UnaryExp>(UnaryExp::UnaryOp::NOT, parseUnaryExp(), sl);
+    } else if (match(AMP)) {
+        size_t sl = CURRENT_LINE;
+        expect(AMP);
+        return std::make_unique<UnaryExp>(UnaryExp::UnaryOp::ADDR, parseUnaryExp(), sl);
+    } else if (match(MULT)) {
+        size_t sl = CURRENT_LINE;
+        expect(MULT);
+        return std::make_unique<UnaryExp>(UnaryExp::UnaryOp::DEREF, parseUnaryExp(), sl);
     } else {
         return parsePostfixExp();
     }
@@ -718,6 +777,8 @@ void Parser::parserLog(const AstNode* root) const {
                 case UnaryExp::UnaryOp::PLUS:    return "+";
                 case UnaryExp::UnaryOp::MINU:    return "-";
                 case UnaryExp::UnaryOp::NOT:     return "!";
+                case UnaryExp::UnaryOp::ADDR:    return "&";
+                case UnaryExp::UnaryOp::DEREF:   return "*";
                 default:                         return "?";
             }
         }

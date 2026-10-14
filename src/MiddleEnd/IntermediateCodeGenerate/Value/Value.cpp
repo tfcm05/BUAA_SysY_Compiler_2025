@@ -1,4 +1,4 @@
-#include "../../../../include/MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
 
 // value
 Value::Value(ValueKind kind, LLVM::Type* type, std::string name)

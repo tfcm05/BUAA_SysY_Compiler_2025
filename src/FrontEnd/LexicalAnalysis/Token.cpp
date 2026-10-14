@@ -1,4 +1,4 @@
-#include"../../../include/FrontEnd/LexicalAnalysis/Token.h"
+#include "FrontEnd/LexicalAnalysis/Token.h"
 
 Token::Token(int line, TokenType tokenType, std::string value) : line(line), tokenType(tokenType), value(std::move(value)) {}
 
@@ -72,6 +72,7 @@ std::string getTypeCode(TokenType tokentype) {
         case ASSIGN: return "ASSIGN";
         case NOT: return "NOT";
         case AND: return "AND";
+        case AMP: return "AMP";
         case OR: return "OR";
         case PLUS: return "PLUS";
         case MINU: return "MINU";

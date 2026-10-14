@@ -1,5 +1,5 @@
-#include "../../../include/BackEnd/MIPS/MIPS.h"
-#include "../../../include/BackEnd/MIPS/MIPSCodeGenerator.h"
+#include "BackEnd/MIPS/MIPS.h"
+#include "BackEnd/MIPS/MIPSCodeGenerator.h"
 
 #include <sstream>
 #include <iomanip>

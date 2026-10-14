@@ -8,7 +8,7 @@
 
 class UnaryExp : public Exp {
 public:
-    enum class UnaryOp { PLUS, MINU, NOT };
+    enum class UnaryOp { PLUS, MINU, NOT, ADDR, DEREF };
 private:
     UnaryOp unaryOp;
     std::unique_ptr<Exp> exp;

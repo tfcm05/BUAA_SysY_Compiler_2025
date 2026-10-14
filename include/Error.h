@@ -41,6 +41,8 @@ typedef enum {
 
     // ===== 语义错误: 赋值 =====
     AssignmentToNonLValue,     // 赋值左侧不是左值
+    AddressOfNonLValue,       // 对非左值取地址
+    DerefNonPointer,          // 对非指针类型解引用
 
     // ===== 语义错误: 控制流 =====
     BreakContinueOutsideLoop,  // 非循环块中使用break/continue

@@ -16,9 +16,12 @@ Clang::ConstValue* evalUnary(ClangContext& ctx, UnaryExp::UnaryOp op, Clang::Con
             constValue = -expIntValue;
             break;
         case UnaryExp::UnaryOp::NOT:
-        default:
             constValue = expIntValue == 0 ? 1 : 0;
             break;
+        case UnaryExp::UnaryOp::ADDR:
+        case UnaryExp::UnaryOp::DEREF:
+        default:
+            return nullptr;
     }
     return ctx.getConstIntegerImpl(constValue);
 }

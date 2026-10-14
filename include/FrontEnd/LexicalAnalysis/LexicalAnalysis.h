@@ -34,6 +34,8 @@ class LexicalAnalysis {
 
         const Token& peekNextTokenRef();  // 查看下一个token（引用）
         const Token& peekSecondTokenRef(); // 查看第二个token（引用）
+        // Peek upcoming token at 0-based buffer index (0 == next token).
+        const Token& peekTokenAt(size_t index);
 
         bool isAssign();
 };

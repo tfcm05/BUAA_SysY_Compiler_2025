@@ -1,6 +1,6 @@
 #include<iostream>
-#include"../../../include/FrontEnd/LexicalAnalysis/LexicalAnalysis.h"
-#include"../../../include/Error.h"
+#include "FrontEnd/LexicalAnalysis/LexicalAnalysis.h"
+#include "Error.h"
 
 std::unordered_map<std::string, TokenType> keywords = {
     {"main", MAINTK},
@@ -208,10 +208,9 @@ Token LexicalAnalysis::getNextTokenInternal() {
             advance();
             return Token(line, TokenType::AND, "&&");
         } else {
-            // 错误处理
-            errorLog(ErrorCode::IllegalChar, line);
+            // Unary / binary address-of or bitwise-and (we only need unary & for now)
             advance();
-            return Token(line, TokenType::AND, "&&");
+            return Token(line, TokenType::AMP, "&");
         }
     } else if (currentChar == '|') {
         if (peek() == '|') {
@@ -267,6 +266,11 @@ const Token& LexicalAnalysis::peekNextTokenRef() {
 const Token& LexicalAnalysis::peekSecondTokenRef() {
     ensureBufferSize(2);
     return tokenBuffer[1];  // 返回引用，无拷贝
+}
+
+const Token& LexicalAnalysis::peekTokenAt(size_t index) {
+    ensureBufferSize(index + 1);
+    return tokenBuffer[index];
 }
 
 bool LexicalAnalysis::isAssign() {

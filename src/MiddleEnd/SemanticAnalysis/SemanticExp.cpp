@@ -218,8 +218,39 @@ InfoPtr SemanticVisitor::visitUnaryExp(UnaryExp* node, ContextPtr context) {
     }
 
     auto info = std::make_shared<SemanticInfo>();
+    auto op = node->getUnaryOp();
+
+    if (op == UnaryExp::UnaryOp::ADDR) {
+        if (!expInfo->isLValue()) {
+            errorLog(ErrorCode::AddressOfNonLValue, node->getStartLine());
+            return nullptr;
+        }
+        if (!expInfo->getType()) {
+            return nullptr;
+        }
+        // &T → pointer to T (arrays keep array type as pointee; no decay on &)
+        info->setType(clangContext.getPointerTyImpl(expInfo->getType()));
+        info->setLValueFlag(false);
+        analysisResult.setExpType(node, info->getType());
+        return info;
+    }
+
+    if (op == UnaryExp::UnaryOp::DEREF) {
+        auto ty = expInfo->getType();
+        if (!ty || !ty->isPointerTy()) {
+            errorLog(ErrorCode::DerefNonPointer, node->getStartLine());
+            return nullptr;
+        }
+        auto ptrTy = static_cast<Clang::PointerType*>(ty);
+        info->setType(ptrTy->getPointedType());
+        info->setLValueFlag(true);
+        analysisResult.setExpType(node, info->getType());
+        return info;
+    }
+
     info->setType(expInfo->getType());
     info->setLValueFlag(false);
+    analysisResult.setExpType(node, info->getType());
 
     SemanticContext& semanticContext = asSem(context);
     if (semanticContext.wantConst()) {

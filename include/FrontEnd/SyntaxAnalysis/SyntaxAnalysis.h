@@ -24,6 +24,7 @@ class Parser {
         DeclSpec parseDeclSpec();
 
         DeclaratorPtr parseDeclarator();
+        DeclaratorPtr parseDeclaratorNoInit();
         InitializerPtr parseInitializer();
 
         VariableDeclPtr parseVarDecl();
@@ -71,6 +72,12 @@ class Parser {
 
         bool match(TokenType expected, int mode);
         bool match(TokenType expected);
+        // offset 0 = current token; 1 = next, ...
+        TokenType tokenTypeAt(int offset);
+        // Local/top-level variable decl starting at current (allows int **p).
+        bool looksLikeVarDecl();
+        // Function decl/def at current (int f(...), void g(), int *f()).
+        bool looksLikeFuncDecl();
 
         void expect(TokenType expected);
     public:

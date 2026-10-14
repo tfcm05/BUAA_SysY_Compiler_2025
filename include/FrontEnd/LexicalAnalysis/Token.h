@@ -13,7 +13,7 @@ typedef enum {
     IFTK, ELSETK, FORTK, WHILETK, DOTK, BREAKTK, CONTINUETK, 
     RETURNTK, 
     ASSIGN, // =
-    NOT, AND, OR, 
+    NOT, AND, OR, AMP, 
     PLUS, MINU, MULT, DIV, MOD, 
     LSS, LEQ, GRE, GEQ, EQL, NEQ, 
     SEMICN/*;*/, COMMA/*,*/, 
