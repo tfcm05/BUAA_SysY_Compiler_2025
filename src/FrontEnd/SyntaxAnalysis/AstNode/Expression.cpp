@@ -38,13 +38,6 @@ void IdentifierExp::setIdentifier(const std::string& id) {
     identifier = id;
 }
 
-Symbol* IdentifierExp::getSymbol() const {
-    return symbol;
-}
-void IdentifierExp::setSymbol(Symbol* s) {
-    symbol = s;
-}
-
 InfoPtr IdentifierExp::accept(AstVisitor& visitor, ContextPtr context) {
     return visitor.visitIdentifierExp(this, context);
 }

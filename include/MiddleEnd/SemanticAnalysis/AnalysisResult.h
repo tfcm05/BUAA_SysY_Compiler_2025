@@ -13,8 +13,7 @@ class ConstValue;
 }
 
 // Session annotations produced by semantic analysis.
-// Keeps Symbol*/type/const off the AST blackboard over time; callers should
-// prefer these maps. AST setSymbol remains as a transitional dual-write.
+// Sole source of truth for Symbol*/exp type/const bindings; AST stays pure syntax.
 class AnalysisResult {
 private:
     std::unordered_map<AstNode*, Symbol*> symbols;

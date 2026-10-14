@@ -65,17 +65,7 @@ IRVisitor::IRVisitor(Module& mod, IRBuilder& bld, LLVMContext& ctx, const Analys
     : module(mod), builder(bld), llvmContext(ctx), analysis(ar) {}
 
 Symbol* IRVisitor::resolveSymbol(AstNode* node) const {
-    if (auto* sym = analysis.getSymbol(node)) {
-        return sym;
-    }
-    // Migration fallback: Declarator / IdentifierExp may still carry Symbol*.
-    if (auto* id = dynamic_cast<IdentifierExp*>(node)) {
-        return id->getSymbol();
-    }
-    if (auto* decl = dynamic_cast<Declarator*>(node)) {
-        return decl->getSymbol();
-    }
-    return nullptr;
+    return analysis.getSymbol(node);
 }
 
 void IRVisitor::finalize() {

@@ -131,13 +131,6 @@ bool DeclSpec::isStatic() const {
 // ----- Declarator -----
 Declarator::Declarator(size_t sl) : AstNode(sl) {}
 
-Symbol* Declarator::getSymbol() const {
-    return symbol;
-}
-void Declarator::setSymbol(Symbol* s) {
-    symbol = s;
-}
-
 IdentDeclarator::IdentDeclarator(const std::string& id, size_t sl)
     : Declarator(sl), identifier(id) {}
 

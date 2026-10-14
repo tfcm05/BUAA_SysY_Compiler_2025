@@ -124,7 +124,7 @@ private:
     Symbol* createSymbol(const std::string& name, StorageClass sc, Clang::Type* type,
                          Symbol::SymbolKind kind, Clang::ConstValue* constValue);
 
-    // Bind symbol into AnalysisResult and dual-write AST during migration.
+    // Bind symbol into AnalysisResult (sole Symbol* binding; AST stays pure syntax).
     void bindSymbol(AstNode* node, Symbol* symbol);
 public:
     SemanticVisitor(ClangContext& cc);

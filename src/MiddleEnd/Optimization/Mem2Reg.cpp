@@ -9,7 +9,9 @@
 #include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/BasicBlock.h"
 #include "MiddleEnd/IntermediateCodeGenerate/Type.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 Mem2Reg::Mem2Reg(Module& module, LLVMContext& context)
@@ -33,13 +35,54 @@ LLVM::Type* Mem2Reg::allocatedType(AllocaInst* alloca) const {
     return static_cast<LLVM::PointerType*>(alloca->getType())->getPointedType();
 }
 
-bool Mem2Reg::isPromotable(AllocaInst* alloca, Function* func,
-                           std::vector<Instruction*>& loads,
-                           std::vector<Instruction*>& stores,
-                           BasicBlock*& soleBlock) const {
+void Mem2Reg::getSuccessors(BasicBlock* bb, BBList& succs) const {
+    succs.clear();
+    const auto& insts = bb->getInstructions();
+    if (insts.empty()) {
+        return;
+    }
+    auto* br = dynamic_cast<BrInstr*>(insts.back());
+    if (!br) {
+        return;
+    }
+    if (br->getCondition() == nullptr) {
+        if (br->getTrueBlock()) {
+            succs.push_back(br->getTrueBlock());
+        }
+    } else {
+        if (br->getTrueBlock()) {
+            succs.push_back(br->getTrueBlock());
+        }
+        if (br->getFalseBlock()) {
+            succs.push_back(br->getFalseBlock());
+        }
+    }
+}
+
+void Mem2Reg::buildCFG(Function* func, PredMap& preds, SuccMap& succs) const {
+    preds.clear();
+    succs.clear();
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        preds[bb];
+        succs[bb];
+    }
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        BBList s;
+        getSuccessors(bb, s);
+        succs[bb] = s;
+        for (BasicBlock* t : s) {
+            preds[t].push_back(bb);
+        }
+    }
+}
+
+bool Mem2Reg::collectUses(AllocaInst* alloca, Function* func,
+                          std::vector<Instruction*>& loads,
+                          std::vector<Instruction*>& stores,
+                          std::unordered_set<BasicBlock*>& useBlocks) const {
     loads.clear();
     stores.clear();
-    soleBlock = nullptr;
+    useBlocks.clear();
 
     LLVM::Type* ty = allocatedType(alloca);
     if (!ty || ty->isArray() || ty->isFunction() || ty->isVoid()) {
@@ -49,15 +92,10 @@ bool Mem2Reg::isPromotable(AllocaInst* alloca, Function* func,
         return false;
     }
 
-    BasicBlock* useBlock = nullptr;
     for (BasicBlock* bb : func->getBasicBlocks()) {
         for (Instruction* inst : bb->getInstructions()) {
             if (inst == alloca) {
-                if (!useBlock) {
-                    useBlock = bb;
-                } else if (useBlock != bb) {
-                    return false; // alloca itself counts as a use-site block
-                }
+                useBlocks.insert(bb);
                 continue;
             }
             if (auto* load = dynamic_cast<LoadInst*>(inst)) {
@@ -66,25 +104,17 @@ bool Mem2Reg::isPromotable(AllocaInst* alloca, Function* func,
                         return false;
                     }
                     loads.push_back(inst);
-                    if (!useBlock) {
-                        useBlock = bb;
-                    } else if (useBlock != bb) {
-                        return false;
-                    }
+                    useBlocks.insert(bb);
                 }
                 continue;
             }
             if (auto* store = dynamic_cast<StoreInst*>(inst)) {
                 if (store->getPointer() == alloca) {
                     if (!store->getValue() || store->getValue()->getType() != ty) {
-                        return false; // refuse ill-typed stores (e.g. i1 into i32*)
-                    }
-                    stores.push_back(inst);
-                    if (!useBlock) {
-                        useBlock = bb;
-                    } else if (useBlock != bb) {
                         return false;
                     }
+                    stores.push_back(inst);
+                    useBlocks.insert(bb);
                     continue;
                 }
                 if (store->getValue() == alloca) {
@@ -139,10 +169,124 @@ bool Mem2Reg::isPromotable(AllocaInst* alloca, Function* func,
             }
         }
     }
+    return !useBlocks.empty();
+}
 
-    soleBlock = useBlock;
-    // Conservative: require a sole block (alloca + all load/store there).
-    return soleBlock != nullptr;
+void Mem2Reg::computeDominators(
+    Function* func, const PredMap& preds,
+    std::unordered_map<BasicBlock*, std::unordered_set<BasicBlock*>>& dom) const {
+    const auto& bbs = func->getBasicBlocks();
+    if (bbs.empty()) {
+        return;
+    }
+    BasicBlock* entry = bbs.front();
+    std::unordered_set<BasicBlock*> all(bbs.begin(), bbs.end());
+
+    for (BasicBlock* bb : bbs) {
+        if (bb == entry) {
+            dom[bb] = {entry};
+        } else {
+            dom[bb] = all;
+        }
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (BasicBlock* bb : bbs) {
+            if (bb == entry) {
+                continue;
+            }
+            std::unordered_set<BasicBlock*> neu = all;
+            const auto& predList = preds.at(bb);
+            if (!predList.empty()) {
+                neu = dom[predList.front()];
+                for (size_t i = 1; i < predList.size(); ++i) {
+                    const auto& pd = dom[predList[i]];
+                    std::unordered_set<BasicBlock*> inter;
+                    for (BasicBlock* x : neu) {
+                        if (pd.count(x)) {
+                            inter.insert(x);
+                        }
+                    }
+                    neu.swap(inter);
+                }
+            }
+            neu.insert(bb);
+            if (neu != dom[bb]) {
+                dom[bb] = std::move(neu);
+                changed = true;
+            }
+        }
+    }
+}
+
+void Mem2Reg::computeIdom(
+    Function* func,
+    const std::unordered_map<BasicBlock*, std::unordered_set<BasicBlock*>>& dom,
+    std::unordered_map<BasicBlock*, BasicBlock*>& idom) const {
+    idom.clear();
+    const auto& bbs = func->getBasicBlocks();
+    if (bbs.empty()) {
+        return;
+    }
+    BasicBlock* entry = bbs.front();
+    idom[entry] = nullptr;
+
+    // Immediate dominator = strict dominator with the largest dominator set
+    // (closest to bb on the dominator chain).
+    for (BasicBlock* bb : bbs) {
+        if (bb == entry) {
+            continue;
+        }
+        BasicBlock* best = nullptr;
+        size_t bestSize = 0;
+        for (BasicBlock* d : dom.at(bb)) {
+            if (d == bb) {
+                continue;
+            }
+            if (dom.at(d).size() > bestSize) {
+                bestSize = dom.at(d).size();
+                best = d;
+            }
+        }
+        idom[bb] = best;
+    }
+}
+
+void Mem2Reg::computeDF(
+    Function* func, const PredMap& preds,
+    const std::unordered_map<BasicBlock*, BasicBlock*>& idom,
+    std::unordered_map<BasicBlock*, std::unordered_set<BasicBlock*>>& df) const {
+    df.clear();
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        df[bb];
+    }
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        const auto& predList = preds.at(bb);
+        if (predList.size() < 2) {
+            continue;
+        }
+        for (BasicBlock* p : predList) {
+            BasicBlock* runner = p;
+            BasicBlock* idomBb = idom.at(bb);
+            while (runner && runner != idomBb) {
+                df[runner].insert(bb);
+                runner = idom.at(runner);
+            }
+        }
+    }
+}
+
+void Mem2Reg::prependPhi(BasicBlock* bb, PhiInstr* phi) const {
+    std::vector<Instruction*> insts = bb->getInstructions();
+    size_t insertAt = 0;
+    while (insertAt < insts.size() && dynamic_cast<PhiInstr*>(insts[insertAt])) {
+        ++insertAt;
+    }
+    insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(insertAt), phi);
+    bb->setInstructions(insts);
+    bb->setTerminator(!insts.empty() && insts.back()->isTerminator());
 }
 
 void Mem2Reg::removeInstructions(
@@ -177,7 +321,6 @@ int Mem2Reg::promoteSingleBlock(AllocaInst* alloca, Function* func,
         doomed.insert(l);
     }
 
-    // Walk in program order: store updates current; load → replace uses.
     for (Instruction* inst : bb->getInstructions()) {
         if (auto* store = dynamic_cast<StoreInst*>(inst)) {
             if (store->getPointer() == alloca) {
@@ -194,10 +337,161 @@ int Mem2Reg::promoteSingleBlock(AllocaInst* alloca, Function* func,
     return 1;
 }
 
+int Mem2Reg::promoteMultiBlock(AllocaInst* alloca, Function* func,
+                               const std::vector<Instruction*>& loads,
+                               const std::vector<Instruction*>& stores,
+                               const PredMap& preds, const SuccMap& succs) {
+    LLVM::Type* ty = allocatedType(alloca);
+    Value* undef = getUndef(ty);
+
+    std::unordered_map<BasicBlock*, std::unordered_set<BasicBlock*>> dom;
+    computeDominators(func, preds, dom);
+    std::unordered_map<BasicBlock*, BasicBlock*> idom;
+    computeIdom(func, dom, idom);
+    std::unordered_map<BasicBlock*, std::unordered_set<BasicBlock*>> df;
+    computeDF(func, preds, idom, df);
+
+    // Definition blocks = blocks with a store (alloca itself is not a value def).
+    std::unordered_set<BasicBlock*> defBlocks;
+    for (Instruction* s : stores) {
+        for (BasicBlock* bb : func->getBasicBlocks()) {
+            for (Instruction* inst : bb->getInstructions()) {
+                if (inst == s) {
+                    defBlocks.insert(bb);
+                }
+            }
+        }
+    }
+
+    // Iterated dominance frontier → Phi sites.
+    std::unordered_set<BasicBlock*> phiSites;
+    std::vector<BasicBlock*> work(defBlocks.begin(), defBlocks.end());
+    while (!work.empty()) {
+        BasicBlock* b = work.back();
+        work.pop_back();
+        for (BasicBlock* d : df[b]) {
+            if (phiSites.insert(d).second) {
+                work.push_back(d);
+            }
+        }
+    }
+
+    std::unordered_map<BasicBlock*, PhiInstr*> phis;
+    // Unique names: multiple allocas may place phis in the same block.
+    static uint32_t phiSerial = 0;
+    const std::string allocaTag = alloca->getName().empty()
+                                      ? ("a" + std::to_string(++phiSerial))
+                                      : alloca->getName();
+    for (BasicBlock* bb : phiSites) {
+        auto* phi = new PhiInstr(
+            ty, {}, bb->getName() + "." + allocaTag + ".m2r." + std::to_string(++phiSerial));
+        ownedPool().push_back(std::unique_ptr<Value>(phi));
+        prependPhi(bb, phi);
+        phis[bb] = phi;
+    }
+
+    // DomTree children
+    std::unordered_map<BasicBlock*, BBList> children;
+    BasicBlock* entry = func->getBasicBlocks().front();
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        BasicBlock* p = idom[bb];
+        if (p) {
+            children[p].push_back(bb);
+        }
+    }
+
+    std::unordered_set<Instruction*> doomed;
+    doomed.insert(alloca);
+    for (Instruction* s : stores) {
+        doomed.insert(s);
+    }
+    for (Instruction* l : loads) {
+        doomed.insert(l);
+    }
+
+    std::vector<Value*> stack;
+    stack.push_back(undef);
+
+    std::function<void(BasicBlock*)> rename = [&](BasicBlock* bb) {
+        size_t stackSize = stack.size();
+
+        if (auto it = phis.find(bb); it != phis.end()) {
+            stack.push_back(it->second);
+        }
+
+        for (Instruction* inst : bb->getInstructions()) {
+            if (doomed.count(inst) && dynamic_cast<AllocaInst*>(inst) == alloca) {
+                continue;
+            }
+            if (auto* store = dynamic_cast<StoreInst*>(inst)) {
+                if (store->getPointer() == alloca) {
+                    stack.push_back(store->getValue());
+                }
+            } else if (auto* load = dynamic_cast<LoadInst*>(inst)) {
+                if (load->getPointer() == alloca) {
+                    replaceUsesInFunction(func, load, stack.back());
+                }
+            }
+        }
+
+        Value* outVal = stack.back();
+        for (BasicBlock* succ : succs.at(bb)) {
+            if (auto it = phis.find(succ); it != phis.end()) {
+                it->second->addIncoming(outVal, bb);
+            }
+        }
+
+        for (BasicBlock* child : children[bb]) {
+            rename(child);
+        }
+
+        stack.resize(stackSize);
+    };
+
+    rename(entry);
+
+    // Dedup phi incomings (one per pred) and ensure every pred has an edge.
+    for (auto& [bb, phi] : phis) {
+        const auto& predList = preds.at(bb);
+        std::unordered_map<BasicBlock*, Value*> byPred;
+        for (const auto& in : phi->getIncomingValues()) {
+            byPred[in.second] = in.first;
+        }
+        std::vector<std::pair<Value*, BasicBlock*>> filled;
+        filled.reserve(predList.size());
+        for (BasicBlock* p : predList) {
+            Value* v = undef;
+            if (auto it = byPred.find(p); it != byPred.end()) {
+                v = it->second;
+            }
+            filled.push_back({v, p});
+        }
+        phi->setIncoming(std::move(filled));
+    }
+
+    // Remove alloca / load / store from all blocks that may contain them.
+    std::unordered_set<BasicBlock*> touch;
+    for (BasicBlock* bb : func->getBasicBlocks()) {
+        for (Instruction* inst : bb->getInstructions()) {
+            if (doomed.count(inst)) {
+                touch.insert(bb);
+            }
+        }
+    }
+    for (BasicBlock* bb : touch) {
+        removeInstructions(bb, doomed);
+    }
+    return 1;
+}
+
 int Mem2Reg::promoteFunction(Function* func) {
     if (!func || func->getBasicBlocks().empty()) {
         return 0;
     }
+
+    PredMap preds;
+    SuccMap succs;
+    buildCFG(func, preds, succs);
 
     std::vector<AllocaInst*> allocas;
     for (BasicBlock* bb : func->getBasicBlocks()) {
@@ -212,11 +506,69 @@ int Mem2Reg::promoteFunction(Function* func) {
     for (AllocaInst* alloca : allocas) {
         std::vector<Instruction*> loads;
         std::vector<Instruction*> stores;
-        BasicBlock* sole = nullptr;
-        if (!isPromotable(alloca, func, loads, stores, sole)) {
+        std::unordered_set<BasicBlock*> useBlocks;
+        if (!collectUses(alloca, func, loads, stores, useBlocks)) {
             continue;
         }
-        promoted += promoteSingleBlock(alloca, func, sole, loads, stores);
+
+        // All load/store (and alloca) in one block → no Phi needed.
+        // Exclude blocks that only contain the alloca with zero load/store from
+        // deciding multi-block when loads/stores share one block.
+        std::unordered_set<BasicBlock*> memBlocks;
+        auto markBlock = [&](Instruction* target) {
+            for (BasicBlock* bb : func->getBasicBlocks()) {
+                for (Instruction* inst : bb->getInstructions()) {
+                    if (inst == target) {
+                        memBlocks.insert(bb);
+                        return;
+                    }
+                }
+            }
+        };
+        for (Instruction* l : loads) {
+            markBlock(l);
+        }
+        for (Instruction* s : stores) {
+            markBlock(s);
+        }
+        // Alloca's block counts only when there are no loads/stores elsewhere —
+        // if loads+stores are empty, still promote by deleting dead alloca.
+        if (loads.empty() && stores.empty()) {
+            // Dead alloca: just remove it from its block.
+            for (BasicBlock* bb : func->getBasicBlocks()) {
+                std::unordered_set<Instruction*> doomed{alloca};
+                for (Instruction* inst : bb->getInstructions()) {
+                    if (inst == alloca) {
+                        removeInstructions(bb, doomed);
+                        ++promoted;
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (memBlocks.size() <= 1) {
+            BasicBlock* sole = *memBlocks.begin();
+            // Loads/stores share one block; alloca may still live in entry.
+            promoted += promoteSingleBlock(alloca, func, sole, loads, stores);
+            for (BasicBlock* bb : func->getBasicBlocks()) {
+                if (bb == sole) {
+                    continue;
+                }
+                for (Instruction* inst : bb->getInstructions()) {
+                    if (inst == alloca) {
+                        removeInstructions(bb, {alloca});
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+
+        promoted += promoteMultiBlock(alloca, func, loads, stores, preds, succs);
+        // CFG may be unchanged; rebuild not required between allocas in same func
+        // unless we altered terminators (we don't). Phi insertion doesn't change CFG.
     }
     return promoted;
 }

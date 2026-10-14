@@ -150,12 +150,5 @@ Symbol* SemanticVisitor::createSymbol(const std::string& name, StorageClass sc, 
 
 void SemanticVisitor::bindSymbol(AstNode* node, Symbol* symbol) {
     analysisResult.bindSymbol(node, symbol);
-    // Dual-write AST for IR paths that still call getSymbol() on Declarator.
-    // IdentifierExp dual-write keeps IR resolveSymbol fallback working.
-    if (auto* id = dynamic_cast<IdentifierExp*>(node)) {
-        id->setSymbol(symbol);
-    } else if (auto* decl = dynamic_cast<Declarator*>(node)) {
-        decl->setSymbol(symbol);
-    }
 }
 

@@ -33,7 +33,6 @@ InfoPtr SemanticVisitor::visitIdentifierExp(IdentifierExp* node, ContextPtr cont
         errorLog(ErrorCode::UndefinedName, node->getStartLine(), node->getIdentifier());
         return nullptr;
     }
-    // AnalysisResult is the primary binding; AST setSymbol is dual-write during migration.
     bindSymbol(node, symbol);
 
     auto info = std::make_shared<SemanticInfo>();

@@ -54,7 +54,7 @@ testfile.txt
        │ Module
        ▼
 ┌──────────────┐
-│  IR 优化      │  PassManager: Mem2Reg(单块) → AS → ConstFold →
+│  IR 优化      │  PassManager: Mem2Reg → AS → ConstFold →
 │  Optimization│  ConstBr → DeadBlock → DeadInstr
 └──────┬───────┘
        │
@@ -95,7 +95,7 @@ src/
 │   │   ├── ClangContext.cpp   # 类型工厂
 │   │   ├── Type.cpp
 │   │   ├── Symbol.cpp         # 符号 (name/type/kind/constValue; 无 Value*)
-│   │   ├── AnalysisResult.h   # 语义注解表 (Symbol/type/const)
+│   │   ├── AnalysisResult.h   # 语义注解唯一来源 (Symbol/type/const; AST 不挂 Symbol*)
 │   │   ├── ConstValue.cpp
 │   │   ├── ScopeGuard.h / DeclaratorTypeBuilder.h
 │   │   └── SymbolTable.cpp    # 作用域与符号表
@@ -118,7 +118,7 @@ src/
 │   └── Optimization/         # IR 优化 Pass
 │       ├── Pass.h / PassManager.h          # Module 级 Pass 接口与编排
 │       ├── IRReplaceUses.cpp               # 安全操作数替换 (扫描式 use-def)
-│       ├── Mem2Reg.cpp                     # 单块标量 alloca→SSA (已接入, 最先跑; 跨块暂缓)
+│       ├── Mem2Reg.cpp                     # 标量 alloca→SSA (单块线性 + 跨块 IDF/Phi)
 │       ├── AlgebraicSimplification.cpp     # 代数化简 (已接入)
 │       ├── IRConstantFolding.cpp           # 常量折叠 (已接入)
 │       ├── ConstantBranchFolding.cpp       # 常量分支化简 (已接入)
@@ -177,8 +177,8 @@ class AstVisitor {
 ```
 
 两种具体实现：
-- `SemanticVisitor` + `SemanticContext`/`SemanticInfo`：类型检查、作用域管理、常量折叠；结果写入 `AnalysisResult`
-- `IRVisitor` + `IRContext`/`IRInfo`：读 `AnalysisResult`，经 `IRBindings` 映射到 `Value*`
+- `SemanticVisitor` + `SemanticContext`/`SemanticInfo`：类型检查、作用域管理、常量折叠；`Symbol*` 只写入 `AnalysisResult`（AST 纯语法）
+- `IRVisitor` + `IRContext`/`IRInfo`：只从 `AnalysisResult` 解析符号，经 `IRBindings` 映射到 `Value*`
 
 `SemanticContext` / `IRContext` 使用显式 bool 字段（`wantConst` / `useLocation` 等），配合 `*ContextGuard` 就地改写再恢复，避免热路径上反复 `clone()`。`AstVisitor` 提供默认空 `visit*`，新增结点不必改所有 Visitor。
 

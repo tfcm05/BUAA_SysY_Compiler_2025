@@ -30,14 +30,10 @@ public:
 class IdentifierExp : public Exp {
 private:
     std::string identifier;
-    Symbol* symbol = nullptr;
 public:
     IdentifierExp(const std::string& id, size_t sl);
     const std::string& getIdentifier() const;
     void setIdentifier(const std::string& id);
-
-    Symbol* getSymbol() const;
-    void setSymbol(Symbol* s);
 
     InfoPtr accept(AstVisitor& visitor, ContextPtr context) override;
 };
