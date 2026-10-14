@@ -1,4 +1,4 @@
-#include "../../../../include/FrontEnd/SyntaxAnalysis/AstNode.h"
+#include "FrontEnd/SyntaxAnalysis/AstNodes.h"
 
 /*
  * Exp and derived classes
@@ -36,13 +36,6 @@ const std::string& IdentifierExp::getIdentifier() const {
 }
 void IdentifierExp::setIdentifier(const std::string& id) {
     identifier = id;
-}
-
-Symbol* IdentifierExp::getSymbol() const {
-    return symbol;
-}
-void IdentifierExp::setSymbol(Symbol* s) {
-    symbol = s;
 }
 
 InfoPtr IdentifierExp::accept(AstVisitor& visitor, ContextPtr context) {

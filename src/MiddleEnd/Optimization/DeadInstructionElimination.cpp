@@ -1,11 +1,24 @@
 #include "MiddleEnd/Optimization/DeadInstructionElimination.h"
+#include "MiddleEnd/Optimization/IRReplaceUses.h"
+
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/User/Instruction/ArithmeticAndLogicalInstr.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/User/Instruction/ControlFlow.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/User/Instruction/FunctionInstr.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/User/Instruction/MemoryAccessInstr.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/BasicBlock.h"
+
+#include <vector>
 
 DeadInstructionElimination::DeadInstructionElimination(Module& module) : module(module) {}
 
+int DeadInstructionElimination::runOnModule(Module& mod, LLVMContext& ctx) {
+    (void)mod;
+    (void)ctx;
+    return run();
+}
+
 bool DeadInstructionElimination::isRemovable(Instruction* instr) {
-    // 白名单: 纯计算 / 内存读 / 栈分配, 无副作用。
-    // LoadInst 有内存读语义, 但无别名分析时保守假设其只读;
-    // AllocaInst 无 use 时同样删除 (其内存写者 store 会保留)。
+    // Whitelist: pure compute / load / unused alloca. No Store/Call/terminators/Phi/GEP.
     return dynamic_cast<AddInstr*>(instr) || dynamic_cast<SubInstr*>(instr) ||
            dynamic_cast<MulInstr*>(instr) || dynamic_cast<SdivInstr*>(instr) ||
            dynamic_cast<AndInstr*>(instr) || dynamic_cast<OrInstr*>(instr) ||
@@ -20,7 +33,6 @@ void DeadInstructionElimination::collectOperands(Instruction* instr, std::set<Va
         }
     };
 
-    // 二元算术 / 逻辑 / 比较
     if (auto* i = dynamic_cast<AddInstr*>(instr)) {
         add(i->getLHS());
         add(i->getRHS());
@@ -44,9 +56,7 @@ void DeadInstructionElimination::collectOperands(Instruction* instr, std::set<Va
         add(i->getRHS());
     } else if (auto* i = dynamic_cast<ZextInstr*>(instr)) {
         add(i->getOperand());
-    }
-    // 内存访问
-    else if (auto* i = dynamic_cast<LoadInst*>(instr)) {
+    } else if (auto* i = dynamic_cast<LoadInst*>(instr)) {
         add(i->getPointer());
     } else if (auto* i = dynamic_cast<StoreInst*>(instr)) {
         add(i->getValue());
@@ -56,24 +66,19 @@ void DeadInstructionElimination::collectOperands(Instruction* instr, std::set<Va
         for (size_t k = 0; k < i->getIndicesCount(); ++k) {
             add(i->getIndex(k));
         }
-    }
-    // 控制流
-    else if (auto* i = dynamic_cast<BrInstr*>(instr)) {
-        add(i->getCondition()); // trueBB/falseBB 为 BasicBlock, 本 pass 不删 BB
+    } else if (auto* i = dynamic_cast<BrInstr*>(instr)) {
+        add(i->getCondition());
     } else if (auto* i = dynamic_cast<RetInstr*>(instr)) {
         add(i->getReturnValue());
     } else if (auto* i = dynamic_cast<PhiInstr*>(instr)) {
         for (size_t k = 0; k < i->getIncomingCount(); ++k) {
             add(i->getIncoming(k).first);
         }
-    }
-    // 函数调用
-    else if (auto* i = dynamic_cast<CallInstr*>(instr)) {
+    } else if (auto* i = dynamic_cast<CallInstr*>(instr)) {
         for (size_t k = 0; k < i->getArgumentsCount(); ++k) {
             add(i->getArgument(k));
         }
     }
-    // AllocaInst 无操作数
 }
 
 int DeadInstructionElimination::eliminateInFunction(Function* func) {
@@ -82,7 +87,6 @@ int DeadInstructionElimination::eliminateInFunction(Function* func) {
     while (changed) {
         changed = false;
 
-        // 统计当前状态下所有被引用的 Value* (含常量/参数/全局/指令)
         std::set<Value*> referenced;
         const auto& bbs = func->getBasicBlocks();
         for (auto* bb : bbs) {
@@ -91,7 +95,6 @@ int DeadInstructionElimination::eliminateInFunction(Function* func) {
             }
         }
 
-        // 删除无引用且可安全删除的指令
         for (auto* bb : bbs) {
             const auto& insts = bb->getInstructions();
             if (insts.empty()) {
@@ -109,7 +112,6 @@ int DeadInstructionElimination::eliminateInFunction(Function* func) {
             }
             if (kept.size() != insts.size()) {
                 bb->setInstructions(kept);
-                // setInstructions 不维护 terminatorFlag, 手动恢复
                 bb->setTerminator(!kept.empty() && kept.back()->isTerminator());
             }
         }
@@ -119,21 +121,11 @@ int DeadInstructionElimination::eliminateInFunction(Function* func) {
 
 int DeadInstructionElimination::run() {
     int total = 0;
-
-    // 处理 functions 列表中的全部函数 (声明无 basicBlocks, 自动跳过)
-    for (auto* func : module.getFunctions()) {
+    for (auto* func : collectModuleFunctions(module)) {
         if (!func || func->getBasicBlocks().empty()) {
             continue;
         }
         total += eliminateInFunction(func);
     }
-
-    // MainFunction 单独注册, 不在 functions 列表时也需处理 (重复处理无副作用)
-    if (auto* main = module.getMainFunction()) {
-        if (!main->getBasicBlocks().empty()) {
-            total += eliminateInFunction(main);
-        }
-    }
-
     return total;
 }

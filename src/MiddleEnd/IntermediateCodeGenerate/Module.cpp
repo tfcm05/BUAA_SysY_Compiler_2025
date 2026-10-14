@@ -1,4 +1,4 @@
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Module.h"
 
 void Module::addFunction(Function* func) { functions.push_back(func); }
 const std::vector<Function*>& Module::getFunctions() const { return functions; }

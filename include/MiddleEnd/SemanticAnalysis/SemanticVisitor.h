@@ -1,26 +1,26 @@
 #ifndef SEMANTIC_VISITOR_H
 #define SEMANTIC_VISITOR_H
-#include "../../FrontEnd/SyntaxAnalysis/AstVisitor.h"
-#include "../../FrontEnd/SyntaxAnalysis/AstNode.h"
-#include "../../Error.h"
-#include "SymbolTable.h"
-#include "ClangContext.h"
-#include "ConstValue.h"
+
+#include "FrontEnd/SyntaxAnalysis/AstVisitor.h"
+#include "MiddleEnd/SemanticAnalysis/SymbolTable.h"
+#include "MiddleEnd/SemanticAnalysis/ClangContext.h"
+#include "MiddleEnd/SemanticAnalysis/ConstValue.h"
+#include "MiddleEnd/SemanticAnalysis/AnalysisResult.h"
+#include "DeclEnums.h"
+
+class AstNode;
+
 #include <fstream>
-#include <iostream>
 #include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 class SemanticInfo : public Info {
 private:
-    // 声明的declType和表达式的expType
-    Clang::Type* type;;
-
-    // 表达式
+    Clang::Type* type;
     bool lValueFlag;
-        // 常量
-        Clang::ConstValue* constValue;
-
-    // 声明
+    Clang::ConstValue* constValue;
     std::string name;
 public:
     SemanticInfo();
@@ -37,57 +37,102 @@ public:
     void setName(const std::string& n);
 };
 
+// Explicit mode flags (no VisitPurpose DSL).
 class SemanticContext : public Context {
-public:
-    enum class VisitPurpose {
-        DEFAULT,                   // 默认
-        GENERATE_SYMBOL,          // 生成符号 (参数)
-        EVALUATE_CONST,           // 常量求值
-        RESOLVE_FUNCTION_BODY_ONLY // 只解析函数体，不创建新作用域
-    };
 private:
-    VisitPurpose purpose;
-
-    // 函数的returnType和变量的varType
+    bool evaluateConstFlag;
+    bool generateParamSymbolsFlag;
+    bool functionBodyOnlyFlag;
     Clang::Type* type;
-
-    // 是否在循环体内
     bool loopFlag;
+    bool staticStorageRegion;
 public:
     SemanticContext();
     ContextPtr clone() override;
 
-    VisitPurpose getVisitPurpose() const;
-    void setVisitPurpose(VisitPurpose vp);
+    bool wantConst() const;
+    void setWantConst(bool v);
+    bool generateParamSymbols() const;
+    void setGenerateParamSymbols(bool v);
+    bool functionBodyOnly() const;
+    void setFunctionBodyOnly(bool v);
+
+    // Clear all mode flags (DEFAULT).
+    void clearModes();
 
     Clang::Type* getType() const;
     void setType(Clang::Type* ty);
 
     bool inLoop() const;
     void setLoopFlag(bool lf);
+
+    bool isStaticStorageRegion() const;
+    void setStaticStorageRegion(bool ssr);
 };
+
+// RAII: mutate SemanticContext and restore on scope exit (prefer over clone).
+class SemanticContextGuard {
+private:
+    SemanticContext& ctx;
+    bool oldWantConst;
+    bool oldGenerateParamSymbols;
+    bool oldFunctionBodyOnly;
+    Clang::Type* oldType;
+    bool oldLoopFlag;
+    bool oldStaticStorageRegion;
+public:
+    explicit SemanticContextGuard(SemanticContext& c)
+        : ctx(c),
+          oldWantConst(c.wantConst()),
+          oldGenerateParamSymbols(c.generateParamSymbols()),
+          oldFunctionBodyOnly(c.functionBodyOnly()),
+          oldType(c.getType()),
+          oldLoopFlag(c.inLoop()),
+          oldStaticStorageRegion(c.isStaticStorageRegion()) {}
+
+    ~SemanticContextGuard() {
+        ctx.setWantConst(oldWantConst);
+        ctx.setGenerateParamSymbols(oldGenerateParamSymbols);
+        ctx.setFunctionBodyOnly(oldFunctionBodyOnly);
+        ctx.setType(oldType);
+        ctx.setLoopFlag(oldLoopFlag);
+        ctx.setStaticStorageRegion(oldStaticStorageRegion);
+    }
+
+    SemanticContextGuard(const SemanticContextGuard&) = delete;
+    SemanticContextGuard& operator=(const SemanticContextGuard&) = delete;
+};
+
+inline SemanticContext& asSem(const ContextPtr& context) {
+    return *static_cast<SemanticContext*>(context.get());
+}
+
+inline std::shared_ptr<SemanticInfo> asSemInfo(const InfoPtr& info) {
+    return std::static_pointer_cast<SemanticInfo>(info);
+}
 
 class SemanticVisitor : public AstVisitor {
 private:
-    // 当前作用域
     SymbolTablePtr curScope;
-
-    // 核心上下文
     ClangContext& clangContext;
-    
-    // 符号表输出文件
+    AnalysisResult analysisResult;
     std::ofstream outputFile;
-    
     std::map<int, std::vector<std::unique_ptr<Symbol>>> symbolRecords;
 
     Clang::Type* convertToType(TypeSpecifier ts, unsigned int tq);
     bool canAssign(Clang::Type* destType, Clang::Type* srcType);
-    Symbol* createSymbol(const std::string& name, StorageClass sc, Clang::Type* type, Symbol::SymbolKind kind, Clang::ConstValue* constValue);
+    Symbol* createSymbol(const std::string& name, StorageClass sc, Clang::Type* type,
+                         Symbol::SymbolKind kind, Clang::ConstValue* constValue);
+
+    // Bind symbol into AnalysisResult (sole Symbol* binding; AST stays pure syntax).
+    void bindSymbol(AstNode* node, Symbol* symbol);
 public:
     SemanticVisitor(ClangContext& cc);
     ~SemanticVisitor() override;
 
-    // Expressions
+    AnalysisResult& analysis() { return analysisResult; }
+    const AnalysisResult& analysis() const { return analysisResult; }
+
     InfoPtr visitLiteralExp(LiteralExp* node, ContextPtr context) override;
     InfoPtr visitIdentifierExp(IdentifierExp* node, ContextPtr context) override;
     InfoPtr visitFunctionCallExp(FunctionCallExp* node, ContextPtr context) override;
@@ -97,7 +142,6 @@ public:
     InfoPtr visitAssignExp(AssignExp* node, ContextPtr context) override;
     InfoPtr visitCommaExp(CommaExp* node, ContextPtr context) override;
 
-    // Statements
     InfoPtr visitExpStmt(ExpStmt* node, ContextPtr context) override;
     InfoPtr visitForStmt(ForStmt* node, ContextPtr context) override;
     InfoPtr visitWhileStmt(WhileStmt* node, ContextPtr context) override;
@@ -108,25 +152,20 @@ public:
     InfoPtr visitReturnStmt(ReturnStmt* node, ContextPtr context) override;
     InfoPtr visitBlockStmt(BlockStmt* node, ContextPtr context) override;
 
-    // Initializers
     InfoPtr visitExpInitializer(ExpInitializer* node, ContextPtr context) override;
     InfoPtr visitListInitializer(ListInitializer* node, ContextPtr context) override;
 
-    // Declarators
     InfoPtr visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) override;
     InfoPtr visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) override;
     InfoPtr visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) override;
     InfoPtr visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) override;
     InfoPtr visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) override;
 
-    // Declarations
     InfoPtr visitVariableDecl(VariableDecl* node, ContextPtr context) override;
     InfoPtr visitFunctionDecl(FunctionDecl* node, ContextPtr context) override;
     InfoPtr visitParameterDecl(ParameterDecl* node, ContextPtr context) override;
 
-    // CompUnit
     InfoPtr visitCompUnit(CompUnit* node, ContextPtr context) override;
 };
-
 
 #endif

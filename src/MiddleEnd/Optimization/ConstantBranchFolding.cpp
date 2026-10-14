@@ -1,10 +1,24 @@
 #include "MiddleEnd/Optimization/ConstantBranchFolding.h"
+#include "MiddleEnd/Optimization/IRReplaceUses.h"
+
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/User/Constant/ConstInt.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/User/Instruction/ControlFlow.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value/BasicBlock.h"
 
 ConstantBranchFolding::ConstantBranchFolding(Module& module) : module(module) {}
 
+int ConstantBranchFolding::runOnModule(Module& mod, LLVMContext& ctx) {
+    (void)mod;
+    (void)ctx;
+    return run();
+}
+
 int ConstantBranchFolding::run() {
     int simplified = 0;
-    for (auto* func : module.getFunctions()) {
+    for (auto* func : collectModuleFunctions(module)) {
+        if (!func) {
+            continue;
+        }
         for (auto* bb : func->getBasicBlocks()) {
             for (auto* inst : bb->getInstructions()) {
                 auto* br = dynamic_cast<BrInstr*>(inst);
@@ -17,11 +31,9 @@ int ConstantBranchFolding::run() {
                 }
                 auto* cint = static_cast<ConstantInt*>(cond);
                 if (cint->getValue() != 0) {
-                    // 恒真: 无条件跳转到 trueBB
                     br->setCondition(nullptr);
                     br->setFalseBlock(nullptr);
                 } else {
-                    // 恒假: 无条件跳转到 falseBB
                     br->setCondition(nullptr);
                     br->setTrueBlock(br->getFalseBlock());
                     br->setFalseBlock(nullptr);

@@ -1,12 +1,11 @@
 #ifndef IR_PRINTER_H
 #define IR_PRINTER_H
 
-#include "Module.h"
-#include "LLVM/Value.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
 
-#include <sstream>
-#include <fstream>
-#include <iostream>
+#include <iosfwd>
+#include <string>
 
 class IRPrinter {
 public:

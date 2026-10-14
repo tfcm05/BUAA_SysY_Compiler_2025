@@ -1,4 +1,4 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/Symbol.h"
+#include "MiddleEnd/SemanticAnalysis/Symbol.h"
 
 Symbol::Symbol(std::string name, StorageClass storageClass, Clang::Type* type, SymbolKind kind, Clang::ConstValue* constValue)
     : name(std::move(name)), storageClass(storageClass), type(type), kind(kind), constValue(constValue) {}
@@ -19,9 +19,6 @@ void Symbol::setKind(SymbolKind k) { kind = k; }
 Clang::ConstValue* Symbol::getConstValue() const { return constValue; }
 void Symbol::setConstValue(Clang::ConstValue* cv) { constValue = cv; }
 
-Value* Symbol::getValue() const { return value; }
-void Symbol::setValue(Value* v) { value = v; }
-
 static std::string typeToStringRecursive(const Clang::Type* type) {
     if (!type) {
         return "UnknownType";
@@ -41,13 +38,11 @@ static std::string typeToStringRecursive(const Clang::Type* type) {
             return prefix + "int";
         case Clang::Type::PointerTyID: {
             auto pointerType = static_cast<const Clang::PointerType*>(type);
-            // 递归调用以处理指向的类型，然后加上 '*'
             return prefix + typeToStringRecursive(pointerType->getPointedType()) + "*";
         }
 
         case Clang::Type::ArrayTyID: {
             auto arrayType = static_cast<const Clang::ArrayType*>(type);
-            // 递归调用以处理元素类型，然后加上 '[size]'
             size_t size = arrayType->getSize();
             return prefix + typeToStringRecursive(arrayType->getElementType()) + "[" + (size != 0 ? std::to_string(size) : "") + "]";
         }
@@ -62,7 +57,6 @@ static std::string typeToStringRecursive(const Clang::Type* type) {
                     paramsStr += ", ";
                 }
             }
-            // 递归调用以处理返回类型，然后加上参数列表
             return prefix + typeToStringRecursive(funcType->getReturnType()) + "(" + paramsStr + ")";
         }
 

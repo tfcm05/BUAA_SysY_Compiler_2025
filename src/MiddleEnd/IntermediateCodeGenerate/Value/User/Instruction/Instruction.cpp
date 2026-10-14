@@ -1,4 +1,4 @@
-#include "../../../../../../include/MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
 
 // instruction
 Instruction::Instruction(LLVM::Type* type, const std::string& name, bool terminatorFlag)

@@ -3,10 +3,9 @@
 
 #include <string>
 #include <memory>
+#include "DeclEnums.h"
 #include "Type.h"
 #include "ConstValue.h"
-
-class Value;
 
 class Symbol {
 public:
@@ -22,8 +21,6 @@ private:
     SymbolKind kind;
 
     Clang::ConstValue* constValue = nullptr;
-
-    Value* value = nullptr; // For IR generation
 public:
     Symbol(std::string name, StorageClass storageClass, Clang::Type* type, SymbolKind kind, Clang::ConstValue* constValue);
 
@@ -42,9 +39,6 @@ public:
 
     Clang::ConstValue* getConstValue() const;
     void setConstValue(Clang::ConstValue* cv);
-
-    Value* getValue() const;
-    void setValue(Value* v);
 
     std::string typeToString();
 };

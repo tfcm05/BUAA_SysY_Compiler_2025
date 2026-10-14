@@ -1,5 +1,5 @@
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/Type.h"
-#include "../../../include/MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Type.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
 
 namespace LLVM {
 

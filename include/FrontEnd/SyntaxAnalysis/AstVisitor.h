@@ -52,48 +52,44 @@ public:
     virtual ContextPtr clone() = 0;
 };
 
+// Default empty visit bodies: new node kinds need not force every visitor to stub.
+// SemanticVisitor still overrides all; IRVisitor skips unused declarator walks.
 class AstVisitor {
 public:
     virtual ~AstVisitor() = default;
 
-    // Expressions
-    virtual InfoPtr visitLiteralExp(LiteralExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitIdentifierExp(IdentifierExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitFunctionCallExp(FunctionCallExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitSubscriptExp(SubscriptExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitUnaryExp(UnaryExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitBinaryExp(BinaryExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitAssignExp(AssignExp* node, ContextPtr context) = 0;
-    virtual InfoPtr visitCommaExp(CommaExp* node, ContextPtr context) = 0;
+    virtual InfoPtr visitLiteralExp(LiteralExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitIdentifierExp(IdentifierExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitFunctionCallExp(FunctionCallExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitSubscriptExp(SubscriptExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitUnaryExp(UnaryExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitBinaryExp(BinaryExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitAssignExp(AssignExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitCommaExp(CommaExp* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
 
-    // Statements
-    virtual InfoPtr visitExpStmt(ExpStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitForStmt(ForStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitWhileStmt(WhileStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitIfStmt(IfStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitBreakStmt(BreakStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitContinueStmt(ContinueStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitReturnStmt(ReturnStmt* node, ContextPtr context) = 0;
-    virtual InfoPtr visitBlockStmt(BlockStmt* node, ContextPtr context) = 0;
+    virtual InfoPtr visitExpStmt(ExpStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitForStmt(ForStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitWhileStmt(WhileStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitDoWhileStmt(DoWhileStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitIfStmt(IfStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitBreakStmt(BreakStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitContinueStmt(ContinueStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitReturnStmt(ReturnStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitBlockStmt(BlockStmt* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
 
-    // Initializers
-    virtual InfoPtr visitExpInitializer(ExpInitializer* node, ContextPtr context) = 0;
-    virtual InfoPtr visitListInitializer(ListInitializer* node, ContextPtr context) = 0;
+    virtual InfoPtr visitExpInitializer(ExpInitializer* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitListInitializer(ListInitializer* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
 
-    // Declarators
-    virtual InfoPtr visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) = 0;
-    virtual InfoPtr visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) = 0;
-    virtual InfoPtr visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) = 0;
-    virtual InfoPtr visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) = 0;
-    virtual InfoPtr visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) = 0;
+    virtual InfoPtr visitIdentDeclarator(IdentDeclarator* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitPointerDeclarator(PointerDeclarator* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitArrayDeclarator(ArrayDeclarator* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitFuncDeclarator(FuncDeclarator* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitInitialDeclarator(InitialDeclarator* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
 
-    // Declarations
-    virtual InfoPtr visitVariableDecl(VariableDecl* node, ContextPtr context) = 0;
-    virtual InfoPtr visitFunctionDecl(FunctionDecl* node, ContextPtr context) = 0;
-    virtual InfoPtr visitParameterDecl(ParameterDecl* node, ContextPtr context) = 0;
+    virtual InfoPtr visitVariableDecl(VariableDecl* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitFunctionDecl(FunctionDecl* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
+    virtual InfoPtr visitParameterDecl(ParameterDecl* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
 
-    // CompUnit
-    virtual InfoPtr visitCompUnit(CompUnit* node, ContextPtr context) = 0;
+    virtual InfoPtr visitCompUnit(CompUnit* node, ContextPtr context) { (void)node; (void)context; return nullptr; }
 };
 #endif

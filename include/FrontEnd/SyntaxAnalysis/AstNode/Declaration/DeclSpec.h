@@ -1,13 +1,7 @@
 #ifndef DECLSPEC_H
 #define DECLSPEC_H
-enum class TypeSpecifier { VOID, INT, CHAR };
 
-enum class StorageClass { NONE, STATIC, };
-
-enum class TypeQualifier : unsigned int { 
-    NONE = 0, 
-    CONST = 1, 
-};
+#include "DeclEnums.h"
 
 class DeclSpec {
 private:

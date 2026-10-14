@@ -1,4 +1,4 @@
-#include "../../../../../../../include/MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVM/Value.h"
 
 // global value
 GlobalValue::GlobalValue(ValueKind kind, LLVM::Type* type, const std::string& name)

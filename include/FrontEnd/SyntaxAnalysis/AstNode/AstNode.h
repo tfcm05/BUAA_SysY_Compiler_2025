@@ -5,8 +5,6 @@
 #include <vector>
 #include <memory>
 
-class Symbol;
-
 class AstNode {
 private:
     size_t startLine;

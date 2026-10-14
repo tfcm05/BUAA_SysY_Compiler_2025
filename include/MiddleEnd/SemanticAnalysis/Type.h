@@ -1,7 +1,6 @@
 #ifndef CLANG_TYPE_H
 #define CLANG_TYPE_H
 
-#include "../../FrontEnd/SyntaxAnalysis/AstNode/Declaration/DeclSpec.h"
 #include <vector>
 #include <memory>
 

@@ -1,19 +1,33 @@
 #include<iostream>
 #include<fstream>
 
-#include"include/FrontEnd/LexicalAnalysis/LexicalAnalysis.h"
-#include"include/FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
+#include "FrontEnd/LexicalAnalysis/LexicalAnalysis.h"
+#include "FrontEnd/SyntaxAnalysis/SyntaxAnalysis.h"
 
-#include "include/MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
-#include "include/MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
-#include "include/MiddleEnd/Optimization/AlgebraicSimplification.h"
-#include "include/BackEnd/MIPS/MIPSCodeGenerator.h"
-#include "include/BackEnd/MIPS/MIPSPeepholeOptimizer.h"
+#include "MiddleEnd/SemanticAnalysis/SemanticVisitor.h"
+#include "Error.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRVisitor.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRBuilder.h"
+#include "MiddleEnd/IntermediateCodeGenerate/Module.h"
+#include "MiddleEnd/IntermediateCodeGenerate/LLVMContext.h"
+#include "MiddleEnd/IntermediateCodeGenerate/IRPrinter.h"
+#include "MiddleEnd/Optimization/PassManager.h"
+#include "MiddleEnd/Optimization/Mem2Reg.h"
+#include "MiddleEnd/Optimization/AlgebraicSimplification.h"
+#include "MiddleEnd/Optimization/IRConstantFolding.h"
+#include "MiddleEnd/Optimization/ConstantBranchFolding.h"
+#include "MiddleEnd/Optimization/DeadBlockElimination.h"
+#include "MiddleEnd/Optimization/DeadInstructionElimination.h"
+#include "BackEnd/MIPS/MIPSCodeGenerator.h"
+#include "BackEnd/MIPS/MIPSPeepholeOptimizer.h"
 
-int main() {
-    std::ifstream file("testfile.txt"); // 打开文件
+#include <memory>
+
+int main(int argc, char* argv[]) {
+    const char* inputPath = (argc > 1) ? argv[1] : "testfile.txt";
+    std::ifstream file(inputPath);
     if (!file.is_open()) {
-        std::cout << "Error: Could not open file\n" << std::endl;
+        std::cout << "Error: Could not open file: " << inputPath << std::endl;
         return 1;
     }
 
@@ -23,7 +37,7 @@ int main() {
     auto root = parse.parse();
     parse.parserLog(root.get());
 
-    // 语义分析
+    // 语义分析 → AnalysisResult (Symbol/type/const annotations)
     ClangContext clangContext;
     SemanticVisitor semanticVisitor(clangContext);
     root->accept(semanticVisitor, std::make_shared<SemanticContext>());
@@ -34,16 +48,32 @@ int main() {
         return 0;
     }
 
-    // 中间代码生成 (IR 打印在 IRVisitor 析构时写入 llvm_ir.txt)
+    // 中间代码生成 (reads AnalysisResult; IRBindings session map for Value*)
     LLVMContext llvmContext;
     Module module;
     IRBuilder builder(llvmContext);
-    IRVisitor irVisitor(module, builder, llvmContext);
+    IRVisitor irVisitor(module, builder, llvmContext, semanticVisitor.analysis());
     root->accept(irVisitor, std::make_shared<IRContext>());
+    irVisitor.finalize();
 
-    // IR 优化 pass
-    AlgebraicSimplification algSim(module, llvmContext);
-    algSim.run();
+    // IR 优化 pipeline (Module-level Passes only; no AST re-walk)
+    // Order: Mem2Reg → algebraic → const fold → const branch → dead blocks → dead instrs
+    {
+        PassManager pm;
+        pm.add(std::make_unique<Mem2Reg>(module, llvmContext));
+        pm.add(std::make_unique<AlgebraicSimplification>(module, llvmContext));
+        pm.add(std::make_unique<IRConstantFolding>(module, llvmContext));
+        pm.add(std::make_unique<ConstantBranchFolding>(module));
+        pm.add(std::make_unique<DeadBlockElimination>(module));
+        pm.add(std::make_unique<DeadInstructionElimination>(module));
+        pm.run(module, llvmContext);
+    }
+
+    // Print IR after all passes (not in IRVisitor destructor)
+    {
+        IRPrinter printer;
+        printer.printModule(module);
+    }
 
     // MIPS 后端: 代码生成 + 窥孔优化
     MIPSCodeGenerator mipsGen(module, llvmContext);

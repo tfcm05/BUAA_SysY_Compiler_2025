@@ -1,5 +1,5 @@
-#include "../../../include/MiddleEnd/SemanticAnalysis/Type.h"
-#include "../../../include/MiddleEnd/SemanticAnalysis/ClangContext.h"
+#include "MiddleEnd/SemanticAnalysis/Type.h"
+#include "MiddleEnd/SemanticAnalysis/ClangContext.h"
 
 namespace Clang {
 

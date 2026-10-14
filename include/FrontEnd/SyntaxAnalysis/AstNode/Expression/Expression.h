@@ -6,8 +6,6 @@
 #include <vector>
 #include <memory>
 
-class ValuePtr;
-
 /*
  * this is expression part
  */
